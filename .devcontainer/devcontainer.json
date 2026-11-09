@@ -4,7 +4,9 @@
   "name": "APK Lab Micronaut service",
   "image": "mcr.microsoft.com/devcontainers/java:1-21-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    // SSH server: gh codespace ssh / gh codespace cp from your terminal (copy an APK in, a screenshot out)
+    "ghcr.io/devcontainers/features/sshd:1": { "version": "latest" }
   },
   // one VM session uses a Worker heap of up to 3 GB plus the JVM: 4 cores / 16 GB is the comfortable size
   "hostRequirements": { "cpus": 4, "memory": "16gb" },

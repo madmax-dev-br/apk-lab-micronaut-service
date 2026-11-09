@@ -22,7 +22,7 @@ bash .devcontainer/runner.sh               # runner na porta 8081; token em ~/.a
 bash .devcontainer/demo.sh app.apk         # sessão + "Tela pronta" + print em tela.png (arraste o APK para o explorador antes)
 ```
 
-A porta 8081 é encaminhada como `https://<codespace>-8081.app.github.dev`, **privada** por padrão: abre só com a sua conta do GitHub. Para chamar da sua máquina, use `gh codespace ports forward 8081:8081` (vira `http://127.0.0.1:8081`) ou torne a porta pública (o Bearer token continua obrigatório). Máquina recomendada: 4 núcleos / 16 GB. O codespace é seu: o APK e os prints ficam nele (`*.apk` é ignorado pelo git) e somem quando você o apaga. O workflow `Devcontainer (Codespaces)` monta o mesmo contêiner no CI e confere que o runner sobe.
+A porta 8081 é encaminhada como `https://<codespace>-8081.app.github.dev`, **privada** por padrão: abre só com a sua conta do GitHub. Para chamar da sua máquina, use `gh codespace ports forward 8081:8081` (vira `http://127.0.0.1:8081`) ou torne a porta pública (o Bearer token continua obrigatório). Pelo terminal da sua máquina: `gh codespace cp -e app.apk 'remote:/workspaces/apk-lab-micronaut-service/'` envia o APK e `gh codespace ssh` abre um shell (o codespace tem servidor SSH). Máquina recomendada: 4 núcleos / 16 GB. O codespace é seu: o APK e os prints ficam nele (`*.apk` é ignorado pelo git) e somem quando você o apaga. O workflow `Devcontainer (Codespaces)` monta o mesmo contêiner no CI e confere que o runner sobe.
 
 ## Início rápido
 
