@@ -1,0 +1,13 @@
+# Unit tests: a fake sidecar (src/test/resources/fake-sidecar.mjs) instead of the APK Web Lab runtime.
+micronaut:
+  server:
+    port: -1
+runner:
+  token: unit-test-token
+  sidecar-script: src/test/resources/fake-sidecar.mjs
+  runtime-dir: src/test/resources/fake-runtime
+  max-line-mb: 1
+  operation-timeout-seconds: 2
+  call-margin-seconds: 0
+  start-timeout-seconds: 10
+  max-sessions: 2

@@ -1,0 +1,23 @@
+# build
+.gradle/
+build/
+out/
+*.class
+# the downloaded APK Web Lab runtime (sidecar/fetch-runtime.mjs) and local data
+vendor/
+data/
+# never commit apps or native code
+*.apk
+*.aab
+*.dex
+*.so
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+# editors and OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+node_modules/
+*.log
+.env

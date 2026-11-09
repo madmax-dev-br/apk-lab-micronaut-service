@@ -1,0 +1,13 @@
+{
+  "name": "apk-lab-micronaut-sidecar",
+  "version": "0.1.0",
+  "description": "Node sidecar of the Micronaut runner: runs one APK Web Lab session (the public runtime's Worker in worker_threads) and speaks JSON lines on stdin/stdout.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "fetch-runtime": "node fetch-runtime.mjs",
+    "check-runtime": "node fetch-runtime.mjs --check"
+  }
+}

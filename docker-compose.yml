@@ -1,0 +1,38 @@
+# Runner + queue on one machine. Set the tokens first (any long random strings):
+#   export RUNNER_TOKEN=$(openssl rand -hex 24) QUEUE_CLIENT_TOKEN=$(openssl rand -hex 24)
+#   docker compose up --build
+# The queue listens on http://127.0.0.1:8080 (clients use QUEUE_CLIENT_TOKEN); the runner is reachable only inside the compose network
+# unless you uncomment its port.
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: docker/runner.Dockerfile
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN}
+      RUNNER_MAX_SESSIONS: ${RUNNER_MAX_SESSIONS:-2}
+      RUNNER_ALLOWED_HOSTS: ${RUNNER_ALLOWED_HOSTS:-}
+      RUNNER_ALLOW_PLUGINS: ${RUNNER_ALLOW_PLUGINS:-false}
+      RUNNER_CORS_ORIGINS: ${RUNNER_CORS_ORIGINS:-}
+    # ports: ["127.0.0.1:8081:8081"]
+    mem_limit: 8g
+    restart: unless-stopped
+
+  queue:
+    build:
+      context: .
+      dockerfile: docker/queue.Dockerfile
+    depends_on: [runner]
+    environment:
+      QUEUE_CLIENTS: "demo:${QUEUE_CLIENT_TOKEN:?set QUEUE_CLIENT_TOKEN}"
+      QUEUE_RUNNERS: "http://runner:8081"
+      QUEUE_RUNNER_TOKEN: ${RUNNER_TOKEN}
+      QUEUE_STORE: file
+      QUEUE_CORS_ORIGINS: ${QUEUE_CORS_ORIGINS:-}
+      QUEUE_ALLOW_PLUGINS: ${QUEUE_ALLOW_PLUGINS:-false}
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["queue-data:/data"]
+    restart: unless-stopped
+
+volumes:
+  queue-data: {}

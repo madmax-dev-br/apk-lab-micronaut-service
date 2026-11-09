@@ -1,0 +1,40 @@
+# Queue configuration. Every value can be set with the environment variable named in ${...}; see docs/ ("Configuração").
+micronaut:
+  application:
+    name: apk-lab-queue
+  server:
+    host: ${QUEUE_HOST:127.0.0.1}
+    port: ${QUEUE_PORT:8080}
+    max-request-size: ${QUEUE_MAX_REQUEST_SIZE:300MB}
+    read-timeout: 600
+    idle-timeout: 30m
+    multipart:
+      max-file-size: ${QUEUE_MAX_REQUEST_SIZE:300MB}
+      disk: true
+    cors:
+      enabled: false   # CORS of the API is the queue's own filter (QUEUE_CORS_ORIGINS), off by default
+jackson:
+  deserialization:
+    fail-on-unknown-properties: true
+  serialization-inclusion: non_null
+
+queue:
+  clients: ${QUEUE_CLIENTS:}
+  auth: ${QUEUE_AUTH:on}
+  cors-origins: ${QUEUE_CORS_ORIGINS:}
+  runners: ${QUEUE_RUNNERS:}
+  runner-token: ${QUEUE_RUNNER_TOKEN:}
+  max-per-client: ${QUEUE_MAX_PER_CLIENT:2}
+  max-queued-per-client: ${QUEUE_MAX_QUEUED_PER_CLIENT:50}
+  max-attempts: ${QUEUE_MAX_ATTEMPTS:3}
+  max-apk-mb: ${QUEUE_MAX_APK_MB:200}
+  apk-url-hosts: ${QUEUE_APK_URL_HOSTS:}
+  job-timeout: ${QUEUE_JOB_TIMEOUT_S:900}s
+  lease-max: ${QUEUE_LEASE_MAX_S:1800}s
+  lease-idle: ${QUEUE_LEASE_IDLE_S:300}s
+  result-ttl: ${QUEUE_RESULT_TTL_S:86400}s
+  health-interval: ${QUEUE_HEALTH_INTERVAL_S:5}s
+  data-dir: ${QUEUE_DATA_DIR:data/queue}
+  store: ${QUEUE_STORE:memory}
+  store-file: ${QUEUE_STORE_FILE:}
+  allow-plugins: ${QUEUE_ALLOW_PLUGINS:false}

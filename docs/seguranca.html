@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Segurança e limites</title>
+<meta name="description" content="Modelo de segurança e limitações do APK Lab Micronaut Service: o que roda onde, plugins, rede, APIs não implementadas, código nativo protegido, WebView e desempenho.">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<header class="top"><div class="bar">
+  <a class="brand" href="index.html">APK Lab · Micronaut</a>
+  <nav>
+    <a href="index.html">Visão geral</a>
+    <a href="api.html">API</a>
+    <a href="cookbook.html">Receitas</a>
+    <a href="seguranca.html" aria-current="page">Segurança e limites</a>
+    <a href="https://github.com/madmax-dev-br/apk-lab-micronaut-service">GitHub</a>
+  </nav>
+  <button class="theme" type="button">Tema</button>
+</div></header>
+<main>
+<aside class="toc">
+  <p class="label">Nesta página</p>
+  <a href="#modelo">Modelo de segurança</a>
+  <a href="#rede">Rede</a>
+  <a href="#plugins">Plugins</a>
+  <a href="#recursos">Recursos e limites</a>
+  <a href="#limitacoes">Limitações</a>
+</aside>
+<article>
+<h1>Segurança e limites</h1>
+<p class="lead">O runner executa código de APKs (o bytecode do app, interpretado pela VM do lab) e, se você permitir, JavaScript de plugins. Trate o acesso à API como acesso de execução nesta máquina.</p>
+
+<h2 id="modelo">Modelo de segurança</h2>
+<ul>
+  <li><strong>Quem pode chamar:</strong> o runner aceita só o portador de <code>RUNNER_TOKEN</code>; a fila aceita os clientes de <code>QUEUE_CLIENTS</code> e isola os jobs e leases de cada um. Exponha a fila, não o runner; ponha HTTPS na frente.</li>
+  <li><strong>O que o APK alcança:</strong> o app roda dentro da VM (Dalvik interpretado em JavaScript). Ele não executa código nativo da máquina: bibliotecas <code>.so</code> do APK só funcionam onde o lab tem uma implementação em JavaScript/WebAssembly do mesmo comportamento; o resto falha com erro explícito. Arquivos do app ficam no sistema de arquivos virtual da VM (e, com <code>RUNNER_APP_DATA_DIR</code>, num diretório por cliente).</li>
+  <li><strong>Processo por sessão:</strong> cada sessão é um processo Node com ambiente mínimo (sem os segredos do runner), heap limitado e timeouts; o APK chega como arquivo do diretório daquela sessão, que é apagado ao fechar.</li>
+  <li><strong>Leitura de arquivos pelo Worker:</strong> o shim do Worker só serve arquivos de dentro do diretório do runtime; qualquer outro <code>file:</code> é recusado.</li>
+  <li><strong>Entrada validada duas vezes:</strong> records Java com Bean Validation (chaves desconhecidas são erro) e depois os sanitizadores do próprio bundle do lab (presets do aparelho, regras de host, mocks, assinaturas de método, permissões). Limites de tamanho: APK (<code>RUNNER_MAX_APK_MB</code>), corpo, config (8 MiB), mocks (50, 4 MiB cada), linhas do protocolo.</li>
+  <li><strong>O runtime baixado</strong> é conferido arquivo por arquivo (tamanho e SHA-256) contra <code>sidecar/runtime.lock.json</code>, fixado num commit do repositório público do site.</li>
+</ul>
+
+<h2 id="rede">Rede</h2>
+<ul>
+  <li>Por padrão (<code>RUNNER_ALLOWED_HOSTS</code> vazio) as sessões não alcançam nenhum host real: o app só recebe respostas de mocks. O operador decide quais hosts podem ser liberados por sessão, redirecionados ou usados como proxy.</li>
+  <li>Um redirecionamento (<code>hostMap</code>) para <code>127.0.0.1</code> alcança serviços da própria máquina do runner: só inclua loopback ou redes internas em <code>RUNNER_ALLOWED_HOSTS</code> quando os usuários forem confiáveis.</li>
+  <li><code>apkUrl</code> da fila só baixa de hosts em <code>QUEUE_APK_URL_HOSTS</code>, sem seguir redirecionamentos, com limite de tamanho.</li>
+</ul>
+
+<h2 id="plugins">Plugins</h2>
+<div class="warn"><strong>Desligados por padrão.</strong> <code>RUNNER_ALLOW_PLUGINS=true</code> permite que quem tem o token rode JavaScript no servidor. Ligue só para usuários confiáveis.</div>
+<ul>
+  <li>Cada plugin roda no sidecar da sessão, num <code>worker_threads</code> Worker próprio com <code>resourceLimits</code> (<code>RUNNER_PLUGIN_HEAP_MB</code>), num contexto <code>node:vm</code> que só tem timers, console (descartado) e a ponte de mensagens: sem <code>process</code>, <code>require</code>, <code>import()</code>, <code>fetch</code> nem o ambiente.</li>
+  <li>Um watchdog mede a utilização da thread do plugin de fora: ocupado acima de 90% por <code>RUNNER_PLUGIN_BUSY_S</code> segundos seguidos, o plugin é encerrado e relatado; <code>RUNNER_PLUGIN_MAX_RUN_S</code> limita a duração total.</li>
+  <li>A API <code>lab</code> é somente leitura (tela, layout bounds, ViewModels, campos, Logcat, rede, imagens): o plugin não toca, não digita e não muda a config.</li>
+  <li><strong><code>worker_threads</code> e <code>node:vm</code> não são uma fronteira de segurança.</strong> Eles removem as capacidades óbvias e limitam memória e CPU, mas código malicioso determinado pode escapar de um contexto <code>vm</code>. Para usuários não confiáveis, mantenha os plugins desligados ou rode cada runner num contêiner/VM descartável sem segredos e sem rede interna.</li>
+</ul>
+
+<h2 id="recursos">Recursos e limites</h2>
+<table>
+<tr><th>Recurso</th><th>Limite</th></tr>
+<tr><td>Sessões simultâneas</td><td><code>RUNNER_MAX_SESSIONS</code>; a fila lê a capacidade de <code>/health</code> e não passa dela.</td></tr>
+<tr><td>Memória por sessão</td><td>Processo Node: <code>RUNNER_SIDECAR_HEAP_MB</code>; Worker da VM: <code>RUNNER_VM_HEAP_MB</code> (até <code>RUNNER_VM_HEAP_MAX_MB</code> com <code>memoryMiB</code>); orçamento Java da VM: <code>memoryMiB</code> até <code>RUNNER_MAX_MEMORY_MIB</code>.</td></tr>
+<tr><td>Tempo</td><td>Carga, operação, evento de entrada (<code>eventSeconds</code>), sessão parada, idade máxima da sessão, job e lease.</td></tr>
+<tr><td>Operações na fila de uma sessão</td><td>32 (depois, <code>429</code> com <code>Retry-After</code>).</td></tr>
+<tr><td>Itens por cliente</td><td><code>QUEUE_MAX_PER_CLIENT</code> rodando, <code>QUEUE_MAX_QUEUED_PER_CLIENT</code> na fila.</td></tr>
+</table>
+
+<h2 id="limitacoes">Limitações</h2>
+<ul>
+  <li><strong>APIs não implementadas falham explicitamente.</strong> Quando o app chama uma API Android/JDK que a VM ainda não tem, a operação falha com um erro que nomeia a API (<code>422 vm-error</code>, detalhes no <code>/diagnostic</code>). O modo tolerante (<code>missingApis</code>: <code>void</code>, <code>primitives</code>, <code>all</code>) troca a falha por stubs, sempre relatados no diagnóstico e no snapshot; nunca há sucesso fingido em silêncio.</li>
+  <li><strong>Código nativo protegido não é simulado.</strong> Bibliotecas nativas que protegem ou decodificam os dados do próprio app (verificação de integridade, detecção de root/emulador, criptografia, anti-fraude, pagamento, atestação) não são reimplementadas, substituídas nem contornadas, e a identidade do aparelho não é alterada para passar nessas verificações. Um app que depende delas para funcionar para nesse ponto, com o erro.</li>
+  <li><strong>WebView:</strong> no servidor não há navegador para desenhar páginas de WebView; a área aparece como um retângulo vazio no screenshot (<code>X-Screenshot-Notes: webviews</code>), e o conteúdo web não é executado.</li>
+  <li><strong>Screenshots:</strong> o que a VM desenha (Compose, Canvas, fundos, parágrafos Skia) é exato; texto simples de widgets XML que o site desenha com o DOM é aproximado com a Roboto do bundle e contado em <code>approximatedText</code>.</li>
+  <li><strong>Áudio, câmera, sensores reais, Bluetooth</strong> não existem no servidor; o que o lab simula (localização, bateria, conectividade) é configurável pela API.</li>
+  <li><strong>Desempenho:</strong> a VM interpreta bytecode em JavaScript. Nos testes deste repositório, numa máquina de desenvolvimento: carregar um APK Compose pequeno leva ~0,45 s, iniciar ~1,2 s, um toque por semântica 30–40 ms, digitação ~0,1–0,2 s, layout bounds ~30 ms, um screenshot 40–50 ms; um job de 10 passos terminou em ~2,8 s. Apps grandes levam bem mais, e cada sessão usa centenas de MiB.</li>
+  <li><strong>Fidelidade:</strong> o comportamento do framework vem dos originais do AOSP (Android 13) que o lab usa, e a VM declara <code>SDK_INT</code> 33; apps que dependem de serviços do Google Play podem não rodar.</li>
+</ul>
+</article>
+</main>
+<footer><div>APK Lab Micronaut Service · <a href="api.html">Referência da API</a> · <a href="cookbook.html">Receitas</a></div></footer>
+</body>
+</html>

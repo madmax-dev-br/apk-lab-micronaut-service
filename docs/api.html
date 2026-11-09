@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Referência da API</title>
+<meta name="description" content="Referência completa da API do runner e da fila do APK Lab Micronaut Service, com exemplos de requisição e resposta.">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<header class="top"><div class="bar">
+  <a class="brand" href="index.html">APK Lab · Micronaut</a>
+  <nav>
+    <a href="index.html">Visão geral</a>
+    <a href="api.html" aria-current="page">API</a>
+    <a href="cookbook.html">Receitas</a>
+    <a href="seguranca.html">Segurança e limites</a>
+    <a href="https://github.com/madmax-dev-br/apk-lab-micronaut-service">GitHub</a>
+  </nav>
+  <button class="theme" type="button">Tema</button>
+</div></header>
+<main>
+<aside class="toc">
+  <p class="label">Runner</p>
+  <a href="#convencoes">Convenções e erros</a>
+  <a href="#servico">Serviço</a>
+  <a href="#criar">Criar sessão</a>
+  <a href="#config">Config da sessão</a>
+  <a href="#ciclo">Ciclo de vida</a>
+  <a href="#entrada">Navegação e entrada</a>
+  <a href="#seletores">Seletores</a>
+  <a href="#tela">Tela e screenshots</a>
+  <a href="#inspecao">Inspeção da VM</a>
+  <a href="#logs">Logcat, rede e eventos</a>
+  <a href="#permissoes">Permissões e dados</a>
+  <a href="#plugins">Plugins</a>
+  <p class="label" style="margin-top:14px">Fila</p>
+  <a href="#fila-servico">Serviço</a>
+  <a href="#jobs">Jobs</a>
+  <a href="#passos">Passos</a>
+  <a href="#leases">Leases</a>
+</aside>
+<article>
+<h1>Referência da API</h1>
+<p class="lead">Runner em <code>http://127.0.0.1:8081</code>, fila em <code>http://127.0.0.1:8080</code> por padrão. Os exemplos usam <code>$R</code> (URL do runner), <code>$T</code> (token do runner), <code>$Q</code> (URL da fila) e <code>$C</code> (token de um cliente da fila).</p>
+
+<h2 id="convencoes">Convenções e erros</h2>
+<ul>
+  <li>JSON em UTF-8. Chaves desconhecidas em qualquer corpo são erro 400 (um erro de digitação nunca é ignorado em silêncio).</li>
+  <li>Coordenadas e limites em dp da tela; <code>bounds</code> são relativos à janela de conteúdo e <code>screenBounds</code> somam a barra de status.</li>
+  <li>Erros: <code>{"error": {"code": "...", "message": "...", "details": {...}}}</code>. O <code>message</code> e os <code>details</code> da VM são os do lab (por exemplo, a API Android que faltou).</li>
+</ul>
+<table>
+<tr><th>Status</th><th>code</th><th>Quando</th></tr>
+<tr><td>400</td><td><code>bad-request</code></td><td>Corpo, config, seletor ou passo inválido.</td></tr>
+<tr><td>401</td><td><code>unauthorized</code></td><td>Token ausente ou errado.</td></tr>
+<tr><td>403</td><td><code>plugins-disabled</code>, <code>network-policy</code>, <code>memory-policy</code>, <code>apk-url-not-allowed</code>, <code>cors-origin-not-allowed</code></td><td>Política do operador.</td></tr>
+<tr><td>404</td><td><code>not-found</code>, <code>element-not-found</code>, <code>nothing-here</code>, <code>view-model-not-found</code></td><td>Sessão, elemento ou recurso inexistente.</td></tr>
+<tr><td>408</td><td><code>wait-timeout</code></td><td><code>/wait</code> esgotou o tempo.</td></tr>
+<tr><td>409</td><td><code>vm-not-running</code>, <code>session-closed</code>, <code>no-screen</code>, <code>not-active</code></td><td>Estado não permite a operação.</td></tr>
+<tr><td>413</td><td><code>too-large</code></td><td>APK ou corpo grande demais.</td></tr>
+<tr><td>422</td><td><code>vm-error</code>, <code>not-editable</code>, <code>not-scrollable</code></td><td>A VM falhou na operação (inclui exceção do app e API não implementada).</td></tr>
+<tr><td>429</td><td><code>too-many-operations</code>, <code>queue-full</code></td><td>Fila de operações da sessão ou da fila cheia (<code>Retry-After</code>).</td></tr>
+<tr><td>503</td><td><code>at-capacity</code>, <code>sidecar-crashed</code>, <code>sidecar-start-failed</code></td><td>Runner cheio (<code>Retry-After: 5</code>) ou processo da sessão caiu.</td></tr>
+<tr><td>504</td><td><code>sidecar-timeout</code></td><td>O sidecar não respondeu e foi encerrado.</td></tr>
+</table>
+
+<h2 id="servico">Runner: serviço</h2>
+<p class="endpoint"><span class="method">GET</span> /health <small>(público)</small></p>
+<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "93d82df0437e",
+ "pluginsAllowed": false, "maxSessions": 2, "activeSessions": 1, "reserved": 0, "available": 1, "freeMemoryMb": 14980}</code></pre>
+<p class="endpoint"><span class="method">GET</span> /stats</p>
+<p>Capacidade, sessões (estado, pid do sidecar, memória do processo Node, cache de rasters) e heap da JVM.</p>
+<p class="endpoint"><span class="method">GET</span> /plugin-templates</p>
+<p>Os modelos de plugin do bundle (<code>id</code>, <code>name</code>, <code>description</code>, <code>code</code>).</p>
+
+<h2 id="criar">Criar sessão</h2>
+<p class="endpoint"><span class="method">POST</span> /sessions</p>
+<p>Três formatos, todos com resposta <code>201</code>:</p>
+<pre><code># multipart: parte "apk" (arquivo) e parte opcional "config" (JSON)
+curl -H "Authorization: Bearer $T" -F apk=@app.apk -F 'config={"launch": true}' $R/sessions
+
+# APK cru; config no cabeçalho X-APK-Config (JSON ASCII ou base64url do JSON)
+curl -H "Authorization: Bearer $T" -H 'Content-Type: application/vnd.android.package-archive' \
+     -H 'X-APK-Config: {"launch":true}' --data-binary @app.apk $R/sessions
+
+# JSON com o APK em base64
+curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+     -d "{\"apkBase64\": \"$(base64 &lt; app.apk | tr -d '\n')\", \"config\": {\"launch\": true}}" $R/sessions</code></pre>
+<pre><code>{"session": {"id": "5efd76bf-...", "state": "running", "packageName": "com.exemplo.app", "launcherActivity": "com.exemplo.app.MainActivity",
+             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "93d82df0437e", ...},
+ "inventory": {"packageName": "...", "usesSdk": {"minSdkVersion": 24, "targetSdkVersion": 34}, "activities": [...], "usesPermissions": [...], ...},
+ "config": { ...a config normalizada... },
+ "snapshot": { ...resumo da tela, se já houver uma... }}</code></pre>
+<p>A sessão é criada em um processo sidecar novo; se a carga falhar (APK inválido, config recusada pelos sanitizadores, exceção do app), a sessão é fechada e o erro volta com o status certo.</p>
+
+<h2 id="config">Config da sessão</h2>
+<p>Todas as chaves são opcionais. Num <code>PATCH /sessions/{id}/config</code>, só as chaves presentes mudam; as marcadas com <em>reload</em> valem na próxima carga (<code>POST /restart</code>) e voltam em <code>restartRequired</code>.</p>
+<pre><code>{
+  "device": {"screen": "phone", "orientation": "portrait", "connectivity": "online", "navigation": "gesture", "fontScale": 1.0,
+             "animatorScale": 1, "statusBarHeightDp": 24, "darkTheme": false, "hour24": true, "locale": "pt-BR",
+             "timeZone": "America/Sao_Paulo", "battery": {"level": 80, "charging": false}},
+  "network": {"allowedHosts": ["api.exemplo.com", "*.cdn.exemplo.com"],
+              "hostMap": [{"from": "https://api.exemplo.com", "to": "127.0.0.1:9000", "enabled": true}],
+              "offline": false, "proxyUrl": ""},
+  "permissions": {"states": {"android.permission.CAMERA": "allow"},
+                  "location": {"enabled": true, "latitude": -23.55, "longitude": -46.63, "accuracy": 15},
+                  "dialogs": "dismiss"},
+  "methodOverrides": [{"method": "Lcom/exemplo/app/Flags;->novoCheckout()Z", "value": "true", "enabled": true}],
+  "ignoredActivities": ["com.exemplo.app.OnboardingActivity"],
+  "endpointMocks": [{"id": "perfil", "name": "perfil", "enabled": true, "method": "GET", "url": "https://api.exemplo.com/v1/perfil",
+                     "query": "ignore", "bodyContains": "", "status": 200, "reason": "",
+                     "headers": [{"name": "Content-Type", "value": "application/json"}], "body": "{\"nome\": \"Ana\"}", "delayMs": 0}],
+  "eventSeconds": 0,
+  "missingApis": "strict",      // reload; "void" | "primitives" | "all" = tolerante (stubs relatados no diagnóstico)
+  "strictCrash": false,         // reload
+  "memoryMiB": 0,               // reload; 0 = automático, ou 512 | 1024 | 2048 | 3072 | 4096 (até RUNNER_MAX_MEMORY_MIB)
+  "appData": {"keep": true, "clear": false},   // reload
+  "raster": "progressive",      // reload; ou "full"
+  "logcat": "on-demand",        // ou "always"
+  "plugins": [],                // exige RUNNER_ALLOW_PLUGINS=true
+  "launch": true                // só na criação: true, false ou o nome de uma Activity
+}</code></pre>
+<table>
+<tr><th>Chave</th><th>Regras</th></tr>
+<tr><td><code>device</code></td><td>Presets e valores do painel do lab: <code>screen</code> phone|compact|large|small|tablet, <code>orientation</code> portrait|landscape, <code>connectivity</code> online|offline|metered, <code>navigation</code> gesture|buttons, <code>fontScale</code> 0.85–2, <code>locale</code> <code>xx-YY</code>, <code>timeZone</code> IANA.</td></tr>
+<tr><td><code>network.allowedHosts</code></td><td><code>host</code>, <code>*.sufixo</code>, <code>host:porta</code>, IP ou <code>*</code>; cada entrada precisa caber em <code>RUNNER_ALLOWED_HOSTS</code> (403 <code>network-policy</code>).</td></tr>
+<tr><td><code>network.hostMap</code></td><td>Redireciona <code>from</code> (esquema, host, porta, curingas) para <code>to</code>; o destino também passa por <code>RUNNER_ALLOWED_HOSTS</code>. Até 50 regras.</td></tr>
+<tr><td><code>network.offline</code></td><td>A VM fica sem rede (ConnectivityManager incluso); mocks continuam respondendo.</td></tr>
+<tr><td><code>network.proxyUrl</code></td><td>Relay HTTPS (ou HTTP em loopback); <code>{url}</code> marca onde vai o destino codificado.</td></tr>
+<tr><td><code>permissions</code></td><td><code>states</code>: allow|deny|ask por permissão; <code>dialogs</code>: dismiss (padrão) | manual | allow | once | deny.</td></tr>
+<tr><td><code>methodOverrides</code></td><td>Até 100; método em descritor Dalvik ou <code>pacote.Classe.metodo(...)</code>; valor literal (<code>true</code>, <code>42</code>, <code>"texto"</code>, <code>null</code>).</td></tr>
+<tr><td><code>ignoredActivities</code></td><td>Até 100; string ou <code>{"name", "enabled"}</code>.</td></tr>
+<tr><td><code>endpointMocks</code></td><td>Até 50; <code>method</code> ANY|GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS; <code>url</code> com <code>http(s)://</code> ou começando com <code>/</code> (qualquer host), <code>*</code> como curinga; <code>query</code> ignore|exact; <code>status</code> 200–599; corpo até 4 MiB (<code>body</code> ou <code>bodyBase64</code>); <code>delayMs</code> até 600000.</td></tr>
+<tr><td><code>eventSeconds</code></td><td>0 ou 60 | 120 | 300: quanto um evento de entrada pode rodar na VM.</td></tr>
+</table>
+
+<h2 id="ciclo">Ciclo de vida</h2>
+<p class="endpoint"><span class="method">GET</span> /sessions · <span class="method">GET</span> /sessions/{id} · <span class="method">DELETE</span> /sessions/{id}</p>
+<p class="endpoint"><span class="method">GET</span> /sessions/{id}/inventory · <span class="method">GET</span> /sessions/{id}/config</p>
+<p class="endpoint"><span class="method">PATCH</span> /sessions/{id}/config</p>
+<pre><code>curl -X PATCH -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+     -d '{"device": {"darkTheme": true}, "endpointMocks": [{"url": "/v1/perfil", "status": 500, "delayMs": 2000}]}' $R/sessions/$S/config
+{"applied": [{"key": "device", "outcome": {...}}, {"key": "endpointMocks", "statuses": [...]}], "restartRequired": [], "running": true, "config": {...}}</code></pre>
+<p class="endpoint"><span class="method">POST</span> /sessions/{id}/restart <small>corpo opcional: <code>{"config": {...}}</code></small></p>
+<p>Recarrega o APK com a config (mais a parcial). Depois de um crash do sidecar, sobe um processo novo.</p>
+
+<h2 id="entrada">Navegação e entrada</h2>
+<p>Toda operação de entrada responde com o resumo da tela em <code>snapshot</code> (<code>activity</code>, <code>views</code>, <code>composeSemantics</code>, <code>systemBars</code>, <code>debugging</code> com mocks/overrides/redirecionamentos ativos).</p>
+<table>
+<tr><th>Endpoint</th><th>Corpo</th></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/launch</code></td><td><code>{"activity"?: "com.exemplo.app.OutraActivity"}</code> → <code>{"launchMs", "snapshot"}</code></td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/intent</code></td><td><code>{"action", "data", "category", "categories", "extras", "type", "component", "flags"}</code> → <code>{"deepLink", "snapshot"}</code></td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/back</code></td><td>—</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/tap</code></td><td><code>{"selector"}</code> ou <code>{"key"}</code> ou <code>{"x", "y"}</code>; <code>"longPress": true</code>. Compose com OnClick usa a ação de semântica; View clicável usa performClick; ponto usa ponteiro real. → <code>{"via", "element", "snapshot"}</code></td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/type</code></td><td><code>{"selector", "text", "append"?}</code>: Compose SetText/InsertTextAtCursor ou EditText.</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/scroll</code></td><td><code>{"selector", "dx", "dy"}</code> (ScrollBy, RecyclerView, ScrollView) ou <code>{"x", "y", "dx", "dy"}</code> (roda do mouse em Compose).</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/wait</code></td><td><code>{"selector", "timeoutMs"? (10000, até 120000), "gone"?}</code> → <code>{"element", "waitedMs", "activity"}</code></td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/input</code></td><td>Entrada crua do Worker com ids do snapshot: <code>{"type": "click"|"input"|"check"|"focus"|"press"|"scroll"|"scrollby"|"compose-action"|"pointer", ...}</code>.</td></tr>
+</table>
+
+<h2 id="seletores">Seletores</h2>
+<pre><code>{"key": "c:7544:47"}                       // chave de /layout-bounds
+{"testTag": "salvar"}                      // Modifier.testTag do Compose
+{"text": "Salvar"}                         // texto exato
+{"textContains": "resultado"}              // trecho (sem diferenciar maiúsculas)
+{"contentDescription": "Voltar"}
+{"androidId": "salvar"}                    // ou "com.exemplo.app:id/salvar"
+{"viewId": 6163}  {"kind": "compose"}  {"clickable": true}  {"index": 1}   // combináveis</code></pre>
+<p>Com várias correspondências, a clicável vem primeiro, depois a menor; <code>index</code> escolhe outra.</p>
+
+<h2 id="tela">Tela e screenshots</h2>
+<table>
+<tr><th>Endpoint</th><th>Resposta</th></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/snapshot</code></td><td>Resumo da tela; <code>?full=1&amp;trace=50</code> devolve o snapshot completo (sem pixels).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/layout-bounds</code></td><td><code>{"activity", "elements": [{"key", "kind", "name", "bounds", "screenBounds", "size", "texts", "testTag", "role", "actions", "clickable", ...}]}</code>; <code>?names=0</code> pula a inspeção Compose que dá nomes.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/elements</code></td><td>Elementos que casam com o seletor da query (<code>?testTag=salvar</code>).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/compose-tree</code></td><td>Árvore de semântica Compose (<code>?maxNodes=2000</code>).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/screen-state</code></td><td>Descrição textual da tela (e se está em branco, com motivos).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/diagnostic</code></td><td>Relatório: último erro, erros de runtime, lacunas de API, saúde da VM, APIs/classes/bibliotecas ausentes, mocks e overrides ativos.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/screenshot.png</code></td><td>PNG da tela; <code>?scale=2&amp;systemBars=0</code>. Cabeçalhos <code>X-Image-Size</code> e <code>X-Screenshot-Notes</code>.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/elements/{key}/screenshot.png</code></td><td>PNG de um elemento pela chave de layout-bounds.</td></tr>
+</table>
+<p>O PNG é composto no sidecar com o CanvasKit (Skia) do próprio bundle: os rasters que a VM desenhou (Compose, Canvas, fundos, sombras, parágrafos Skia) ficam onde a página os põe; texto simples de widgets XML que o site desenharia com o DOM é aproximado com a Roboto do bundle e contado em <code>X-Screenshot-Notes</code> (<code>approximatedText</code>).</p>
+
+<h2 id="inspecao">Inspeção da VM</h2>
+<table>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/activity</code></td><td>A Activity em primeiro plano, janelas e estado.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/view-models</code></td><td><code>[{"className", "handle", "owner", "library"}]</code> da tela ativa.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/fragments</code></td><td>Fragments da Activity.</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/inspect</code></td><td><code>{"handle", "options"?}</code>: campos de um objeto.</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/field</code></td><td><code>{"handle", "path": "estado.value", "options"?}</code>: um campo (MutableState, StateFlow, LiveData, listas e mapas são resumidos).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/methods?query=</code></td><td>Busca de métodos do app (para montar overrides).</td></tr>
+</table>
+
+<h2 id="logs">Logcat, rede e eventos</h2>
+<table>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/logcat</code></td><td><code>?since=&amp;limit=500&amp;level=W&amp;tag=&amp;contains=</code> → <code>{"lines": [{"seq", "level", "tag", "message", "thread", ...}], "next", "more", "total", "dropped", "streaming"}</code></td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/logcat/stream</code></td><td>SSE: um evento <code>log</code> por linha, <code>id</code> = <code>seq</code>; <code>?since=</code> ou <code>Last-Event-ID</code> retoma.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/network</code></td><td><code>?since=&amp;limit=200</code> → <code>{"requests": [{"seq", "method", "url", "status", "outcome", "mockId", "mockLabel", "mappedUrl", "refusedHost", "durationMs", ...}], ...}</code></td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/network/stream</code></td><td>SSE: evento <code>request</code> por linha (de novo quando completa).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/events</code></td><td>SSE: <code>session</code> (descrição inicial), <code>snapshot</code>, <code>loaded</code>, <code>runtime-error</code>, <code>permission-request</code>, <code>permission-config</code>, <code>app-data</code>, <code>plugin</code>, <code>crashed</code>, <code>closed</code>.</td></tr>
+</table>
+<p>As linhas do Logcat só saem da VM enquanto alguém escuta (um stream aberto, um plugin que pediu logs, uma leitura paginada em andamento ou <code>"logcat": "always"</code>). Todo stream manda <code>ping</code> a cada 15 s e termina quando a sessão fecha.</p>
+
+<h2 id="permissoes">Permissões e dados do app</h2>
+<p class="endpoint"><span class="method">GET</span> /sessions/{id}/permission-requests · <span class="method">POST</span> /sessions/{id}/permission-requests/{requestId}</p>
+<p>Com <code>permissions.dialogs = "manual"</code>, os diálogos de permissão ficam pendentes e são respondidos com <code>{"answer": "allow" | "once" | "deny" | "dismiss"}</code>.</p>
+<p class="endpoint"><span class="method">POST</span> /sessions/{id}/app-data/clear</p>
+
+<h2 id="plugins">Plugins</h2>
+<p>Desligados por padrão; exigem <code>RUNNER_ALLOW_PLUGINS=true</code> (veja <a href="seguranca.html#plugins">Segurança</a>). Um plugin é o corpo de uma função async com a mesma API <code>lab</code> (somente leitura) dos plugins do site.</p>
+<table>
+<tr><td><span class="method">PUT</span> <code>/sessions/{id}/plugins</code></td><td><code>{"plugins": [{"id", "name", "code", "enabled"}]}</code> (lista vazia remove todos)</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/plugins</code></td><td>Estado e saída de cada um (<code>?images=inline</code> embute imagens em base64).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/plugins/{pid}</code></td><td>Um plugin: <code>status</code>, <code>badge</code>, <code>blocks</code>, <code>console</code>, <code>errors</code>, <code>stats</code>.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/plugins/stream</code></td><td>SSE: evento <code>plugin</code> quando a saída muda.</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/plugins/{pid}/stop</code> · <code>/restart</code></td><td>Parar ou reiniciar.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/plugins/{pid}/blocks/{index}/image</code></td><td>Uma imagem produzida pelo plugin.</td></tr>
+</table>
+
+<h2 id="fila-servico">Fila: serviço</h2>
+<table>
+<tr><td><span class="method">GET</span> <code>/health</code> (público)</td><td><code>{"ok", "runners": [{"id", "healthy", "available"}], "queued"}</code></td></tr>
+<tr><td><span class="method">GET</span> <code>/runners</code></td><td>Registro: url, healthy, available, maxSessions, pluginsAllowed, runtimeRevision, lastHealth, lastError.</td></tr>
+<tr><td><span class="method">GET</span> <code>/stats</code></td><td>Do cliente: maxConcurrent, queued, running, succeeded, failed.</td></tr>
+<tr><td><span class="method">GET</span> <code>/steps</code></td><td>Os tipos de passo e os campos de cada um.</td></tr>
+</table>
+
+<h2 id="jobs">Jobs</h2>
+<p class="endpoint"><span class="method">POST</span> /jobs → 202</p>
+<pre><code># multipart: "apk" + "job" (JSON)
+curl -H "Authorization: Bearer $C" -F apk=@app.apk -F 'job={"priority": 7, "steps": [{"type": "launch"}, {"type": "screenshot", "name": "inicio"}]}' $Q/jobs
+# APK cru + X-Job (JSON ASCII ou base64url) · JSON com apkBase64 · JSON com apkUrl (host em QUEUE_APK_URL_HOSTS)</code></pre>
+<pre><code>{"config": {...config da sessão...}, "steps": [...], "priority": 5, "timeoutMs": 300000,
+ "collect": {"logcat": true, "network": true}, "label": "smoke", "maxAttempts": 3}</code></pre>
+<p>Sem <code>steps</code>, o job só inicia o app. Resposta: o job com <code>id</code>, <code>state</code> (<code>queued</code> → <code>assigned</code> → <code>running</code> → <code>succeeded</code> | <code>failed</code> | <code>cancelled</code>), <code>position</code> na fila, <code>attempts</code>.</p>
+<table>
+<tr><td><span class="method">GET</span> <code>/jobs?state=</code></td><td>Os jobs do cliente (mais novos primeiro, até 500).</td></tr>
+<tr><td><span class="method">GET</span> <code>/jobs/{id}</code></td><td>O job com <code>result</code>: <code>steps</code> (<code>index</code>, <code>type</code>, <code>ok</code>, <code>ms</code>, <code>output</code> ou <code>error</code>), <code>artifacts</code> (<code>name</code>, <code>type</code>, <code>bytes</code>, <code>url</code>), <code>session</code> (pacote, runner, tempos).</td></tr>
+<tr><td><span class="method">GET</span> <code>/jobs/{id}/events</code></td><td>SSE: <code>queued</code>, <code>assigned</code>, <code>running</code>, <code>step-started</code>, <code>step-finished</code>, <code>retry</code>, e o estado final (o stream termina nele).</td></tr>
+<tr><td><span class="method">GET</span> <code>/jobs/{id}/artifacts/{name}</code></td><td>Screenshots PNG e dumps JSON.</td></tr>
+<tr><td><span class="method">POST</span> <code>/jobs/{id}/cancel</code> · <span class="method">DELETE</span> <code>/jobs/{id}</code></td><td>Cancela (na fila ou rodando: o passo atual é interrompido e a sessão fechada).</td></tr>
+</table>
+<p><strong>Agendamento:</strong> maior prioridade (0–9, padrão 5) primeiro; na mesma prioridade, o cliente com menos itens rodando; depois o mais antigo. Cada cliente tem até <code>QUEUE_MAX_PER_CLIENT</code> (ou o próprio limite) itens com sessão. O job vai para o runner saudável com mais vagas (health menos o que a fila já atribuiu desde então). <strong>Retentativas:</strong> runner inacessível, 5xx, sidecar caído ou VM parada repetem o job em outro runner até <code>maxAttempts</code> com espera crescente; runner cheio repete sem contar tentativa; falha de um passo do app não repete.</p>
+
+<h2 id="passos">Passos</h2>
+<table>
+<tr><th>type</th><th>Campos</th><th>Saída / artefato</th></tr>
+<tr><td><code>launch</code></td><td><code>activity</code></td><td>activity, launchMs</td></tr>
+<tr><td><code>intent</code></td><td><code>intent</code> (corpo de /intent)</td><td>deepLink, activity</td></tr>
+<tr><td><code>wait</code></td><td><code>selector</code>, <code>gone</code>, <code>timeoutMs</code></td><td>element, waitedMs</td></tr>
+<tr><td><code>tap</code></td><td><code>selector</code> ou <code>x</code>/<code>y</code>, <code>longPress</code></td><td>via, element</td></tr>
+<tr><td><code>type</code></td><td><code>selector</code>, <code>text</code>, <code>append</code></td><td>via, element</td></tr>
+<tr><td><code>scroll</code></td><td><code>selector</code> ou <code>x</code>/<code>y</code>, <code>dx</code>, <code>dy</code></td><td>via</td></tr>
+<tr><td><code>back</code>, <code>sleep</code></td><td>— , <code>ms</code> (até 60000)</td><td></td></tr>
+<tr><td><code>screenshot</code></td><td><code>scale</code>, <code>systemBars</code>, <code>selector</code> ou <code>key</code> (só o elemento)</td><td><code>&lt;nome&gt;.png</code></td></tr>
+<tr><td><code>layoutBounds</code></td><td><code>names</code></td><td>count, <code>&lt;nome&gt;.layout-bounds.json</code></td></tr>
+<tr><td><code>snapshot</code>, <code>composeTree</code> (<code>maxNodes</code>), <code>diagnostic</code></td><td></td><td>JSON como artefato</td></tr>
+<tr><td><code>elements</code>, <code>screenState</code>, <code>viewModels</code></td><td><code>selector</code></td><td>na saída</td></tr>
+<tr><td><code>viewModelField</code></td><td><code>viewModel</code> (classe ou sufixo), <code>path</code>, <code>options</code></td><td>viewModel, handle, value</td></tr>
+<tr><td><code>inspect</code>, <code>field</code></td><td><code>handle</code>, <code>path</code>, <code>options</code></td><td>na saída</td></tr>
+<tr><td><code>config</code></td><td><code>config</code> (PATCH ao vivo)</td><td>applied, restartRequired</td></tr>
+<tr><td><code>logcat</code>, <code>network</code></td><td><code>level</code>, <code>tag</code>, <code>contains</code>, <code>limit</code></td><td>JSON como artefato</td></tr>
+<tr><td><code>plugins</code></td><td><code>plugins</code>, <code>seconds</code> (exige <code>QUEUE_ALLOW_PLUGINS</code> e um runner com plugins)</td><td>saída dos plugins, imagens como artefatos</td></tr>
+</table>
+<p>Comuns: <code>name</code> (único; nomeia os artefatos), <code>continueOnError</code>, <code>timeoutMs</code>. Campos que não são do tipo do passo são erro 400.</p>
+
+<h2 id="leases">Leases interativos</h2>
+<p class="endpoint"><span class="method">POST</span> /leases → 202</p>
+<pre><code>{"config": {...}, "priority": 5, "durationSeconds": 900, "waitSeconds": 60, "label": "depuração"}</code></pre>
+<p>Mesmos formatos de envio do APK que <code>/jobs</code> (parte multipart <code>lease</code>). O lease entra na fila; quando um runner tem vaga, vira <code>active</code> com <code>expiresAt</code> e a sessão criada. A partir daí, <strong>toda a API de sessão do runner</strong> fica em <code>/leases/{id}/session/...</code>:</p>
+<pre><code>curl -H "Authorization: Bearer $C" -H 'Content-Type: application/json' -d '{"selector": {"testTag": "salvar"}}' $Q/leases/$L/session/tap
+curl -H "Authorization: Bearer $C" -o tela.png $Q/leases/$L/session/screenshot.png
+curl -N "$Q/leases/$L/session/logcat/stream?access_token=$C"</code></pre>
+<table>
+<tr><td><span class="method">GET</span> <code>/leases</code> · <code>/leases/{id}</code> · <code>/leases/{id}/events</code></td><td>Estado (<code>queued</code>, <code>active</code>, <code>expired</code>, <code>cancelled</code>, <code>failed</code>), posição, expiração.</td></tr>
+<tr><td><span class="method">POST</span> <code>/leases/{id}/extend</code></td><td><code>{"seconds": 300}</code> (até <code>QUEUE_LEASE_MAX_S</code> desde o início).</td></tr>
+<tr><td><span class="method">DELETE</span> <code>/leases/{id}</code></td><td>Encerra e fecha a sessão no runner.</td></tr>
+</table>
+<p>O lease expira por duração (<code>lease-max-duration</code>), por inatividade sem chamadas pelo proxy (<code>lease-idle</code>; streams abertos contam como uso) ou por esperar na fila mais que <code>waitSeconds</code> (<code>lease-wait-timeout</code>).</p>
+</article>
+</main>
+<footer><div>APK Lab Micronaut Service · <a href="cookbook.html">Receitas</a> · <a href="seguranca.html">Segurança e limites</a></div></footer>
+</body>
+</html>

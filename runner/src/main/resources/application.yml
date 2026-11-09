@@ -1,0 +1,49 @@
+# Runner configuration. Every value can be set with the environment variable named in ${...}; see docs/ ("Configuração").
+micronaut:
+  application:
+    name: apk-lab-runner
+  server:
+    host: ${RUNNER_HOST:127.0.0.1}
+    port: ${RUNNER_PORT:8081}
+    max-request-size: ${RUNNER_MAX_REQUEST_SIZE:256MB}
+    read-timeout: 600
+    idle-timeout: 30m
+    multipart:
+      max-file-size: ${RUNNER_MAX_REQUEST_SIZE:256MB}
+      disk: true
+    cors:
+      enabled: false   # CORS of the API is the runner's own filter (RUNNER_CORS_ORIGINS), off by default
+jackson:
+  deserialization:
+    fail-on-unknown-properties: true   # a typo in a body is a 400, never silently ignored
+  serialization-inclusion: non_null
+
+runner:
+  token: ${RUNNER_TOKEN:}
+  auth: ${RUNNER_AUTH:on}
+  cors-origins: ${RUNNER_CORS_ORIGINS:}
+  max-sessions: ${RUNNER_MAX_SESSIONS:2}
+  max-apk-mb: ${RUNNER_MAX_APK_MB:200}
+  idle-timeout-seconds: ${RUNNER_IDLE_TIMEOUT_S:600}
+  session-max-seconds: ${RUNNER_SESSION_MAX_S:3600}
+  vm-heap-mb: ${RUNNER_VM_HEAP_MB:2048}
+  vm-heap-max-mb: ${RUNNER_VM_HEAP_MAX_MB:6144}
+  max-memory-mib: ${RUNNER_MAX_MEMORY_MIB:2048}
+  sidecar-heap-mb: ${RUNNER_SIDECAR_HEAP_MB:512}
+  load-timeout-seconds: ${RUNNER_LOAD_TIMEOUT_S:120}
+  operation-timeout-seconds: ${RUNNER_OPERATION_TIMEOUT_S:45}
+  start-timeout-seconds: ${RUNNER_SIDECAR_START_TIMEOUT_S:30}
+  call-margin-seconds: ${RUNNER_SIDECAR_CALL_MARGIN_S:15}
+  max-line-mb: ${RUNNER_SIDECAR_MAX_LINE_MB:64}
+  allowed-hosts: ${RUNNER_ALLOWED_HOSTS:}
+  allow-plugins: ${RUNNER_ALLOW_PLUGINS:false}
+  plugin-max: ${RUNNER_PLUGIN_MAX:4}
+  plugin-heap-mb: ${RUNNER_PLUGIN_HEAP_MB:64}
+  plugin-busy-seconds: ${RUNNER_PLUGIN_BUSY_S:5}
+  plugin-max-run-seconds: ${RUNNER_PLUGIN_MAX_RUN_S:0}
+  plugin-max-code-kb: ${RUNNER_PLUGIN_MAX_CODE_KB:256}
+  app-data-dir: ${RUNNER_APP_DATA_DIR:}
+  runtime-dir: ${APK_LAB_RUNTIME_DIR:}
+  node: ${RUNNER_NODE:node}
+  sidecar-script: ${RUNNER_SIDECAR_SCRIPT:sidecar/vm-host.mjs}
+  work-dir: ${RUNNER_WORK_DIR:}

@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receitas da API</title>
+<meta name="description" content="Receitas do APK Lab Micronaut Service com curl e com o HttpClient do Micronaut: mocks de endpoint, redirecionamento de host, permissões, overrides, deep links, jobs, leases, SSE, plugins, screenshots e CORS.">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<header class="top"><div class="bar">
+  <a class="brand" href="index.html">APK Lab · Micronaut</a>
+  <nav>
+    <a href="index.html">Visão geral</a>
+    <a href="api.html">API</a>
+    <a href="cookbook.html" aria-current="page">Receitas</a>
+    <a href="seguranca.html">Segurança e limites</a>
+    <a href="https://github.com/madmax-dev-br/apk-lab-micronaut-service">GitHub</a>
+  </nav>
+  <button class="theme" type="button">Tema</button>
+</div></header>
+<main>
+<aside class="toc">
+  <p class="label">Receitas</p>
+  <a href="#preparo">Preparo</a>
+  <a href="#r1">1. Sessão com mock de endpoint</a>
+  <a href="#r2">2. Mock por padrão, 500 com atraso</a>
+  <a href="#r3">3. Redirecionar um host</a>
+  <a href="#r4">4. Lista de hosts e offline</a>
+  <a href="#r5">5. Permissões e localização</a>
+  <a href="#r6">6. Override de retorno de método</a>
+  <a href="#r7">7. Ignorar uma Activity</a>
+  <a href="#r8">8. Aparelho ao vivo</a>
+  <a href="#r9">9. Deep link</a>
+  <a href="#r10">10. Job na fila com passos</a>
+  <a href="#r11">11. Lease interativo</a>
+  <a href="#r12">12. Logcat e rede por SSE</a>
+  <a href="#r13">13. Plugin observando um ViewModel</a>
+  <a href="#r14">14. Screenshot de um elemento</a>
+  <a href="#r15">15. CORS</a>
+</aside>
+<article>
+<h1>Receitas</h1>
+<p class="lead">Cada receita tem a versão em <code>curl</code> e a versão em Java com o <code>HttpClient</code> do Micronaut. Os nomes de pacote e de host (<code>com.exemplo.app</code>, <code>api.exemplo.com</code>) são ilustrativos: troque pelos do seu app.</p>
+
+<h2 id="preparo">Preparo</h2>
+<pre><code>export R=http://127.0.0.1:8081 T=$RUNNER_TOKEN      # runner
+export Q=http://127.0.0.1:8080 C=token-do-cliente   # fila</code></pre>
+<span class="lang">Java (Gradle: implementation("io.micronaut:micronaut-http-client"))</span>
+<pre><code>import com.fasterxml.jackson.databind.JsonNode;
+import io.micronaut.http.HttpRequest;
+import io.micronaut.http.MediaType;
+import io.micronaut.http.client.BlockingHttpClient;
+import io.micronaut.http.client.HttpClient;
+import io.micronaut.http.client.multipart.MultipartBody;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+
+HttpClient client = HttpClient.create(new URL("http://127.0.0.1:8081"));
+BlockingHttpClient http = client.toBlocking();
+String token = System.getenv("RUNNER_TOKEN");
+byte[] apk = Files.readAllBytes(Path.of("app.apk"));
+
+// cria uma sessão com uma config (JSON) e devolve o id
+String criar(String config) {
+    MultipartBody body = MultipartBody.builder()
+            .addPart("apk", "app.apk", MediaType.of("application/vnd.android.package-archive"), apk)
+            .addPart("config", config)
+            .build();
+    JsonNode created = http.retrieve(HttpRequest.POST("/sessions", body).contentType(MediaType.MULTIPART_FORM_DATA_TYPE).bearerAuth(token), JsonNode.class);
+    return created.path("session").path("id").asText();
+}</code></pre>
+
+<h2 id="r1">1. Sessão criada já com um mock de endpoint</h2>
+<p>O app pede <code>GET https://api.exemplo.com/v1/perfil</code>; o lab responde 200 com JSON sem a requisição sair da VM. Nenhum host precisa estar liberado. A linha da requisição no log de rede vem marcada com <code>mockId</code> e <code>mockLabel</code>, e o Logcat registra um aviso <code>APKWebLab: endpoint mockado</code> no primeiro uso.</p>
+<pre><code>curl -s -H "Authorization: Bearer $T" -F apk=@app.apk -F 'config={
+  "endpointMocks": [{
+    "name": "perfil", "method": "GET", "url": "https://api.exemplo.com/v1/perfil", "status": 200,
+    "headers": [{"name": "Content-Type", "value": "application/json"}],
+    "body": "{\"nome\": \"Ana\", \"plano\": \"premium\"}"
+  }],
+  "launch": true
+}' $R/sessions | tee sessao.json
+S=$(jq -r .session.id sessao.json)
+
+# use o app até ele pedir o perfil (aqui: tocar no botão que carrega)
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"selector": {"text": "Perfil"}}' $R/sessions/$S/tap &gt; /dev/null
+curl -s -H "Authorization: Bearer $T" "$R/sessions/$S/network" | jq '.requests[] | {method, url, status, mockId, mockLabel}'
+# {"method": "GET", "url": "https://api.exemplo.com/v1/perfil", "status": 200, "mockId": "m-…", "mockLabel": "perfil"}</code></pre>
+<span class="lang">Java</span>
+<pre><code>String id = criar("""
+    {"endpointMocks": [{"name": "perfil", "method": "GET", "url": "https://api.exemplo.com/v1/perfil", "status": 200,
+                        "headers": [{"name": "Content-Type", "value": "application/json"}],
+                        "body": "{\\"nome\\": \\"Ana\\", \\"plano\\": \\"premium\\"}"}],
+     "launch": true}""");
+http.retrieve(HttpRequest.POST("/sessions/" + id + "/tap", Map.of("selector", Map.of("text", "Perfil"))).bearerAuth(token), JsonNode.class);
+JsonNode network = http.retrieve(HttpRequest.GET("/sessions/" + id + "/network").bearerAuth(token), JsonNode.class);
+for (JsonNode row : network.path("requests")) {
+    System.out.printf("%s %s -> %d (mock: %s)%n", row.path("method").asText(), row.path("url").asText(), row.path("status").asInt(), row.path("mockLabel").asText());
+}</code></pre>
+<p class="note">Este fluxo (criar com mock, iniciar, tocar, ler o log de rede) é o teste <code>CookbookClientTest</code> do repositório, rodado com um APK de sonda sintético.</p>
+
+<h2 id="r2">2. Mock por padrão de caminho, query, corpo, status e atraso</h2>
+<p>Um 500 depois de 2 s para qualquer POST de pedidos cujo corpo contenha <code>"urgente": true</code>, em qualquer host; aplicado ao vivo numa sessão aberta. O primeiro mock habilitado que casa (na ordem da lista) responde.</p>
+<pre><code>curl -s -X PATCH -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{
+  "endpointMocks": [
+    {"name": "pedido urgente falha", "method": "POST", "url": "/v2/pedidos*", "query": "ignore",
+     "bodyContains": "\"urgente\": true", "status": 500, "reason": "Internal Server Error",
+     "headers": [{"name": "Content-Type", "value": "application/json"}],
+     "body": "{\"erro\": \"indisponível\"}", "delayMs": 2000},
+    {"name": "busca exata", "method": "GET", "url": "https://api.exemplo.com/v1/busca?q=monitor&amp;pagina=1", "query": "exact",
+     "status": 200, "body": "[]"}
+  ]}' $R/sessions/$S/config | jq '.applied'</code></pre>
+<span class="lang">Java</span>
+<pre><code>var falha = Map.of("name", "pedido urgente falha", "method", "POST", "url", "/v2/pedidos*", "bodyContains", "\"urgente\": true",
+        "status", 500, "headers", List.of(Map.of("name", "Content-Type", "value", "application/json")),
+        "body", "{\"erro\": \"indisponível\"}", "delayMs", 2000);
+JsonNode applied = http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config", Map.of("endpointMocks", List.of(falha))).bearerAuth(token), JsonNode.class);</code></pre>
+<p>No log de rede a requisição aparece com status 500, <code>durationMs</code> por volta de 2000 e o <code>mockLabel</code>.</p>
+
+<h2 id="r3">3. Redirecionar um host</h2>
+<p>As requisições do app para <code>https://api.exemplo.com</code> vão para um servidor seu em <code>127.0.0.1:9000</code> (HTTP comum; o app continua achando que falou com o host original). O destino precisa estar em <code>RUNNER_ALLOWED_HOSTS</code> do runner (aqui, <code>RUNNER_ALLOWED_HOSTS=127.0.0.1</code>).</p>
+<pre><code>curl -s -H "Authorization: Bearer $T" -F apk=@app.apk -F 'config={
+  "network": {"hostMap": [{"from": "https://api.exemplo.com", "to": "127.0.0.1:9000"}]},
+  "launch": true}' $R/sessions | jq -r .session.id
+# no log de rede: "url": "https://api.exemplo.com/...", "mappedUrl": "http://127.0.0.1:9000/...", "mappedRule": "https://api.exemplo.com → 127.0.0.1:9000"</code></pre>
+<span class="lang">Java</span>
+<pre><code>String id = criar("""
+    {"network": {"hostMap": [{"from": "https://api.exemplo.com", "to": "127.0.0.1:9000"}]}, "launch": true}""");</code></pre>
+<p><code>from</code> aceita esquema, porta e curinga (<code>*.exemplo.com</code>); <code>to</code> aceita <code>host:porta</code> ou uma URL. Um destino fora da política do runner é recusado com <code>403 network-policy</code>.</p>
+
+<h2 id="r4">4. Lista de hosts permitidos e modo offline</h2>
+<pre><code># só estes hosts (cada um dentro de RUNNER_ALLOWED_HOSTS); o resto falha como sem DNS e aparece com "refusedHost" no log de rede
+curl -s -X PATCH -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+     -d '{"network": {"allowedHosts": ["api.exemplo.com", "*.cdn.exemplo.com"]}}' $R/sessions/$S/config
+
+# aparelho sem rede (o ConnectivityManager também diz offline); mocks continuam respondendo
+curl -s -X PATCH -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"network": {"offline": true}}' $R/sessions/$S/config</code></pre>
+<span class="lang">Java</span>
+<pre><code>http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config",
+        Map.of("network", Map.of("allowedHosts", List.of("api.exemplo.com", "*.cdn.exemplo.com")))).bearerAuth(token), JsonNode.class);
+http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config", Map.of("network", Map.of("offline", true))).bearerAuth(token), JsonNode.class);</code></pre>
+
+<h2 id="r5">5. Permissões e localização</h2>
+<p>Localização concedida, posição simulada em São Paulo, e diálogos de permissão respondidos com "permitir".</p>
+<pre><code>curl -s -H "Authorization: Bearer $T" -F apk=@app.apk -F 'config={
+  "permissions": {
+    "states": {"android.permission.ACCESS_FINE_LOCATION": "allow", "android.permission.CAMERA": "deny"},
+    "location": {"enabled": true, "latitude": -23.5505, "longitude": -46.6333, "accuracy": 10},
+    "dialogs": "allow"},
+  "launch": true}' $R/sessions
+
+# ou responder cada diálogo: "dialogs": "manual", e então
+curl -s -H "Authorization: Bearer $T" $R/sessions/$S/permission-requests
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"answer": "once"}' $R/sessions/$S/permission-requests/3</code></pre>
+<span class="lang">Java</span>
+<pre><code>var permissions = Map.of(
+        "states", Map.of("android.permission.ACCESS_FINE_LOCATION", "allow"),
+        "location", Map.of("enabled", true, "latitude", -23.5505, "longitude", -46.6333, "accuracy", 10),
+        "dialogs", "allow");
+http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config", Map.of("permissions", permissions)).bearerAuth(token), JsonNode.class);</code></pre>
+
+<h2 id="r6">6. Override do retorno de um método</h2>
+<p>Força o retorno de um método do app (por exemplo, uma flag de funcionalidade) sem recompilar. Use <code>GET /sessions/{id}/methods?query=checkout</code> para achar a assinatura.</p>
+<pre><code>curl -s -X PATCH -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{
+  "methodOverrides": [{"method": "Lcom/exemplo/app/Flags;->novoCheckout()Z", "value": "true"}]}' $R/sessions/$S/config | jq '.applied[0].statuses'</code></pre>
+<span class="lang">Java</span>
+<pre><code>http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config",
+        Map.of("methodOverrides", List.of(Map.of("method", "Lcom/exemplo/app/Flags;->novoCheckout()Z", "value", "true")))).bearerAuth(token), JsonNode.class);</code></pre>
+<p class="note">Overrides são uma ferramenta de depuração do comportamento do seu próprio app. Eles não servem para contornar proteções (verificação de integridade, detecção de root, anti-fraude): veja <a href="seguranca.html">Segurança e limites</a>.</p>
+
+<h2 id="r7">7. Ignorar uma Activity</h2>
+<p>O pedido para abrir a Activity é descartado (e relatado em <code>snapshot.debugging.ignoredActivities</code>): útil para pular uma tela de boas-vindas.</p>
+<pre><code>curl -s -H "Authorization: Bearer $T" -F apk=@app.apk -F 'config={"ignoredActivities": ["com.exemplo.app.OnboardingActivity"], "launch": true}' $R/sessions</code></pre>
+<span class="lang">Java</span>
+<pre><code>String id = criar("{\"ignoredActivities\": [\"com.exemplo.app.OnboardingActivity\"], \"launch\": true}");</code></pre>
+
+<h2 id="r8">8. Configurações do aparelho ao vivo</h2>
+<pre><code>curl -s -X PATCH -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{
+  "device": {"darkTheme": true, "fontScale": 1.3, "locale": "en-US", "orientation": "landscape", "battery": {"level": 15, "charging": false}}
+}' $R/sessions/$S/config | jq '.applied[] | select(.key == "device")'
+curl -s -H "Authorization: Bearer $T" -o paisagem.png $R/sessions/$S/screenshot.png</code></pre>
+<span class="lang">Java</span>
+<pre><code>var device = Map.of("darkTheme", true, "fontScale", 1.3, "locale", "en-US", "orientation", "landscape");
+http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config", Map.of("device", device)).bearerAuth(token), JsonNode.class);</code></pre>
+<p>As chaves que só valem numa nova carga (<code>missingApis</code>, <code>strictCrash</code>, <code>memoryMiB</code>, <code>appData</code>, <code>raster</code>) voltam em <code>restartRequired</code>; aplique com <code>POST /sessions/{id}/restart</code>.</p>
+
+<h2 id="r9">9. Deep link</h2>
+<pre><code>curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+     -d '{"action": "android.intent.action.VIEW", "data": "https://exemplo.com/pedidos/42"}' $R/sessions/$S/intent | jq '{deepLink, activity: .snapshot.activity}'</code></pre>
+<span class="lang">Java</span>
+<pre><code>JsonNode result = http.retrieve(HttpRequest.POST("/sessions/" + id + "/intent",
+        Map.of("action", "android.intent.action.VIEW", "data", "https://exemplo.com/pedidos/42")).bearerAuth(token), JsonNode.class);
+System.out.println(result.path("deepLink") + " -> " + result.path("snapshot").path("activity").asText());</code></pre>
+
+<h2 id="r10">10. Job na fila com passos e seus resultados</h2>
+<pre><code>curl -s -H "Authorization: Bearer $C" -F apk=@app.apk -F 'job={
+  "label": "fluxo de pedido", "priority": 7, "collect": {"network": true},
+  "config": {"endpointMocks": [{"url": "https://api.exemplo.com/v1/perfil", "body": "{\"nome\": \"Ana\"}"}]},
+  "steps": [
+    {"type": "launch"},
+    {"type": "wait", "selector": {"text": "Pedidos"}, "timeoutMs": 20000},
+    {"type": "type", "selector": {"testTag": "busca"}, "text": "Monitor"},
+    {"type": "tap", "selector": {"testTag": "pedido-2"}},
+    {"type": "layoutBounds", "name": "caixas"},
+    {"type": "screenshot", "name": "detalhe"},
+    {"type": "viewModelField", "viewModel": "PedidosViewModel", "path": "estado.value"}
+  ]}' $Q/jobs | tee job.json
+J=$(jq -r .id job.json)
+curl -N -H "Authorization: Bearer $C" $Q/jobs/$J/events        # progresso; termina no estado final
+curl -s -H "Authorization: Bearer $C" $Q/jobs/$J | jq '{state, steps: [.result.steps[] | {type, ok, ms}], artifacts: [.result.artifacts[].name]}'
+curl -s -H "Authorization: Bearer $C" -o detalhe.png $Q/jobs/$J/artifacts/detalhe.png</code></pre>
+<span class="lang">Java</span>
+<pre><code>HttpClient fila = HttpClient.create(new URL("http://127.0.0.1:8080"));
+String clientToken = System.getenv("QUEUE_CLIENT_TOKEN");
+String job = """
+    {"label": "fluxo de pedido", "steps": [{"type": "launch"}, {"type": "wait", "selector": {"text": "Pedidos"}},
+     {"type": "tap", "selector": {"testTag": "pedido-2"}}, {"type": "screenshot", "name": "detalhe"}]}""";
+MultipartBody body = MultipartBody.builder()
+        .addPart("apk", "app.apk", MediaType.of("application/vnd.android.package-archive"), apk)
+        .addPart("job", job).build();
+JsonNode submitted = fila.toBlocking().retrieve(HttpRequest.POST("/jobs", body).contentType(MediaType.MULTIPART_FORM_DATA_TYPE).bearerAuth(clientToken), JsonNode.class);
+String jobId = submitted.path("id").asText();
+JsonNode state;
+do {
+    Thread.sleep(500);
+    state = fila.toBlocking().retrieve(HttpRequest.GET("/jobs/" + jobId).bearerAuth(clientToken), JsonNode.class);
+} while (List.of("queued", "assigned", "running").contains(state.path("state").asText()));
+byte[] png = fila.toBlocking().retrieve(HttpRequest.GET("/jobs/" + jobId + "/artifacts/detalhe.png").bearerAuth(clientToken), byte[].class);</code></pre>
+<p>Cada passo fica em <code>result.steps</code> com <code>ok</code>, <code>ms</code> e <code>output</code> (ou <code>error</code> com o código do runner, por exemplo <code>element-not-found</code>); com <code>continueOnError</code> um passo pode falhar sem encerrar o job. Falhas de infraestrutura (runner fora, sidecar caído) repetem o job em outro runner.</p>
+
+<h2 id="r11">11. Lease interativo</h2>
+<pre><code>curl -s -H "Authorization: Bearer $C" -F apk=@app.apk -F 'lease={"durationSeconds": 900, "config": {"launch": true}}' $Q/leases | tee lease.json
+L=$(jq -r .id lease.json)
+curl -s -H "Authorization: Bearer $C" $Q/leases/$L | jq '{state, position, expiresAt}'   # espere "active"
+curl -s -H "Authorization: Bearer $C" -H 'Content-Type: application/json' -d '{"selector": {"text": "Entrar"}}' $Q/leases/$L/session/tap
+curl -s -H "Authorization: Bearer $C" -o tela.png $Q/leases/$L/session/screenshot.png
+curl -s -H "Authorization: Bearer $C" -H 'Content-Type: application/json' -d '{"seconds": 600}' $Q/leases/$L/extend
+curl -s -X DELETE -H "Authorization: Bearer $C" $Q/leases/$L</code></pre>
+<span class="lang">Java</span>
+<pre><code>String leaseId = fila.toBlocking().retrieve(HttpRequest.POST("/leases", MultipartBody.builder()
+        .addPart("apk", "app.apk", MediaType.of("application/vnd.android.package-archive"), apk)
+        .addPart("lease", "{\"durationSeconds\": 900, \"config\": {\"launch\": true}}").build())
+        .contentType(MediaType.MULTIPART_FORM_DATA_TYPE).bearerAuth(clientToken), JsonNode.class).path("id").asText();
+// ... espere state == "active" ...
+fila.toBlocking().retrieve(HttpRequest.POST("/leases/" + leaseId + "/session/tap", Map.of("selector", Map.of("text", "Entrar"))).bearerAuth(clientToken), JsonNode.class);
+fila.toBlocking().exchange(HttpRequest.DELETE("/leases/" + leaseId).bearerAuth(clientToken));</code></pre>
+
+<h2 id="r12">12. Logcat e log de rede por SSE</h2>
+<pre><code>curl -N -H "Authorization: Bearer $T" "$R/sessions/$S/logcat/stream"
+# id: 41
+# event: log
+# data: {"seq":41,"level":"W","tag":"APKWebLab","message":"endpoint mockado: GET https://api.exemplo.com/v1/perfil -> 200",...}
+
+curl -N -H "Authorization: Bearer $T" "$R/sessions/$S/network/stream"
+curl -N "$R/sessions/$S/logcat/stream?since=41&amp;access_token=$T"      # retoma depois da linha 41</code></pre>
+<span class="lang">Java (Gradle: io.micronaut.reactor:micronaut-reactor)</span>
+<pre><code>import io.micronaut.http.client.sse.SseClient;
+import io.micronaut.http.sse.Event;
+import reactor.core.publisher.Flux;
+
+SseClient sse = SseClient.create(new URL("http://127.0.0.1:8081"));
+Flux.from(sse.eventStream(HttpRequest.GET("/sessions/" + id + "/logcat/stream").bearerAuth(token), JsonNode.class))
+    .filter(event -> "log".equals(event.getName()))
+    .map(Event::getData)
+    .subscribe(line -> System.out.println(line.path("level").asText() + " " + line.path("tag").asText() + ": " + line.path("message").asText()));</code></pre>
+<p>Enquanto nenhum stream está aberto, a VM não manda linhas de Logcat ao servidor (custo zero); abrir o primeiro stream liga o envio e manda as linhas recentes.</p>
+
+<h2 id="r13">13. Plugin no servidor observando um campo de ViewModel</h2>
+<p>Exige <code>RUNNER_ALLOW_PLUGINS=true</code> (só para usuários confiáveis: veja <a href="seguranca.html#plugins">Segurança</a>). O código é o de um plugin do site: a API <code>lab</code> somente leitura.</p>
+<pre><code>cat &gt; plugin.json &lt;&lt;'EOF'
+{"plugins": [{"id": "observar-vm", "name": "Observar ViewModel", "code": "const lista = await lab.viewModels();\nconst vm = lista.find(v => v.className.endsWith('PedidosViewModel')) ?? lista.find(v => !v.library);\nif (!vm) { lab.ui.text('Nenhum ViewModel na tela'); return; }\nlab.ui.badge(vm.className.split('.').pop());\nlab.watch(vm.handle, 'estado.value', valor => lab.ui.json(valor, { id: 'estado' }), { intervalMs: 250, depth: 2 });"}]}
+EOF
+curl -s -X PUT -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d @plugin.json $R/sessions/$S/plugins
+curl -N -H "Authorization: Bearer $T" $R/sessions/$S/plugins/stream        # um evento "plugin" a cada mudança do campo
+curl -s -H "Authorization: Bearer $T" $R/sessions/$S/plugins/observar-vm | jq '{status, badge, blocks}'</code></pre>
+<span class="lang">Java</span>
+<pre><code>String code = """
+    const lista = await lab.viewModels();
+    const vm = lista.find(v => v.className.endsWith('PedidosViewModel')) ?? lista.find(v => !v.library);
+    if (!vm) { lab.ui.text('Nenhum ViewModel na tela'); return; }
+    lab.ui.badge(vm.className.split('.').pop());
+    lab.watch(vm.handle, 'estado.value', valor => lab.ui.json(valor, { id: 'estado' }), { intervalMs: 250, depth: 2 });
+    """;
+http.retrieve(HttpRequest.PUT("/sessions/" + id + "/plugins", Map.of("plugins", List.of(Map.of("id", "observar-vm", "code", code)))).bearerAuth(token), JsonNode.class);
+JsonNode plugin = http.retrieve(HttpRequest.GET("/sessions/" + id + "/plugins/observar-vm").bearerAuth(token), JsonNode.class);</code></pre>
+<p>Num job, o passo <code>{"type": "plugins", "plugins": [...], "seconds": 10}</code> roda os plugins por 10 s e guarda a saída (imagens viram artefatos); exige <code>QUEUE_ALLOW_PLUGINS=true</code> e um runner com plugins.</p>
+
+<h2 id="r14">14. Screenshot de um elemento pela chave de layout-bounds</h2>
+<pre><code>KEY=$(curl -s -H "Authorization: Bearer $T" $R/sessions/$S/layout-bounds | jq -r '.elements[] | select(.testTag == "pedido-2") | .key')
+curl -s -H "Authorization: Bearer $T" -o pedido.png "$R/sessions/$S/elements/$KEY/screenshot.png?scale=2"
+file pedido.png     # PNG image data, 758 x 144, ...</code></pre>
+<span class="lang">Java</span>
+<pre><code>JsonNode bounds = http.retrieve(HttpRequest.GET("/sessions/" + id + "/layout-bounds").bearerAuth(token), JsonNode.class);
+String key = null;
+for (JsonNode element : bounds.path("elements")) if ("pedido-2".equals(element.path("testTag").asText())) key = element.path("key").asText();
+byte[] png = http.retrieve(HttpRequest.GET("/sessions/" + id + "/elements/" + key + "/screenshot.png?scale=2").bearerAuth(token), byte[].class);
+Files.write(Path.of("pedido.png"), png);</code></pre>
+<p>As chaves (<code>c:&lt;owner&gt;:&lt;nó&gt;</code> para Compose, <code>v:&lt;id&gt;</code> para Views) valem para o quadro atual; leia <code>/layout-bounds</code> de novo depois de mudar de tela.</p>
+
+<h2 id="r15">15. CORS</h2>
+<p><strong>A VM no servidor não precisa de CORS.</strong> As requisições HTTP do app saem do processo sidecar (Node), não de um navegador: não existe origem nem preflight para elas. No site, o app roda dentro do navegador e por isso o servidor da API do app precisa liberar a origem do site; aqui, não.</p>
+<p>CORS só importa para <strong>a API do runner ou da fila</strong> quando um front end no navegador a chama de outra origem. Desligado por padrão; ligue com a lista exata de origens:</p>
+<pre><code>RUNNER_CORS_ORIGINS=https://painel.exemplo.com,http://localhost:5173 ./gradlew :runner:run
+QUEUE_CORS_ORIGINS=https://painel.exemplo.com ./gradlew :queue:run</code></pre>
+<span class="lang">JavaScript no navegador</span>
+<pre><code>const R = 'https://runner.exemplo.com';
+const res = await fetch(`${R}/sessions/${id}/tap`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ selector: { testTag: 'salvar' } }),
+});
+// EventSource não envia cabeçalhos: o token vai como access_token (só em GET)
+const logs = new EventSource(`${R}/sessions/${id}/logcat/stream?access_token=${encodeURIComponent(token)}`);
+logs.addEventListener('log', event => console.log(JSON.parse(event.data).message));
+const png = URL.createObjectURL(await (await fetch(`${R}/sessions/${id}/screenshot.png`, { headers: { Authorization: `Bearer ${token}` } })).blob());</code></pre>
+<ul>
+  <li>O preflight (<code>OPTIONS</code>) é respondido antes da autenticação; uma origem fora da lista recebe <code>403 cors-origin-not-allowed</code>.</li>
+  <li>Não há cookies: a autenticação é por token, então <code>Access-Control-Allow-Credentials</code> não é enviado nem necessário.</li>
+  <li>Os cabeçalhos expostos ao navegador: <code>X-Image-Size</code>, <code>X-Screenshot-Notes</code>, <code>Retry-After</code>, <code>Content-Disposition</code>.</li>
+  <li>Um token no navegador é visível para quem usa a página: dê ao front end um token de cliente da fila (com limite próprio) em vez do token do runner sempre que possível.</li>
+</ul>
+</article>
+</main>
+<footer><div>APK Lab Micronaut Service · <a href="api.html">Referência da API</a> · <a href="seguranca.html">Segurança e limites</a></div></footer>
+</body>
+</html>

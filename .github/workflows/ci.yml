@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Unit tests use a fake sidecar (runner/src/test/resources/fake-sidecar.mjs) and fake runners; the end-to-end tests are skipped because
+      # APK_LAB_RUNTIME_DIR and APK_LAB_TEST_APK_DIR are not set (no runtime download, no APKs, no external network).
+      - run: ./gradlew --no-daemon test
+      - name: Sidecar syntax
+        run: |
+          for f in sidecar/*.mjs sidecar/lib/*.mjs; do node --check "$f"; done
+      - name: Repository hygiene
+        run: |
+          if git ls-files | grep -Ei '\.(apk|aab|dex|so)$'; then echo "binary app files must not be committed"; exit 1; fi
+          if git ls-files | grep -E '^vendor/'; then echo "the runtime is downloaded, never committed"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports
+          path: '**/build/reports/tests/'

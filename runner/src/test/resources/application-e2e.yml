@@ -1,0 +1,4 @@
+# End-to-end tests (RunnerEndToEndTest): the real sidecar and runtime; the remaining values come from the test's property provider.
+micronaut:
+  server:
+    port: -1

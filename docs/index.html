@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APK Lab Micronaut Service</title>
+<meta name="description" content="Rode APKs Android reais num servidor Java: um runner Micronaut que carrega o APK no runtime do APK Web Lab (via um sidecar Node) e uma fila Micronaut que organiza o uso.">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<header class="top"><div class="bar">
+  <a class="brand" href="index.html">APK Lab · Micronaut</a>
+  <nav>
+    <a href="index.html" aria-current="page">Visão geral</a>
+    <a href="api.html">API</a>
+    <a href="cookbook.html">Receitas</a>
+    <a href="seguranca.html">Segurança e limites</a>
+    <a href="https://github.com/madmax-dev-br/apk-lab-micronaut-service">GitHub</a>
+  </nav>
+  <button class="theme" type="button">Tema</button>
+</div></header>
+<main>
+<aside class="toc">
+  <p class="label">Nesta página</p>
+  <a href="#o-que-e">O que é</a>
+  <a href="#arquitetura">Arquitetura</a>
+  <a href="#por-que-sidecar">Por que um sidecar Node</a>
+  <a href="#protocolo">Protocolo do sidecar</a>
+  <a href="#inicio-rapido">Início rápido</a>
+  <a href="#docker">Docker Compose</a>
+  <a href="#autenticacao">Autenticação</a>
+  <a href="#configuracao">Configuração</a>
+  <a href="#testes">Testes</a>
+  <a href="#node">Relação com o serviço Node</a>
+</aside>
+<article>
+<h1>APK Lab Micronaut Service</h1>
+<p class="lead">Dois serviços Micronaut (Java 21) para rodar APKs Android reais num servidor com o runtime do <a href="https://madmax-dev-br.github.io/apk-browser-lab-site/">APK Web Lab</a>: um <strong>runner</strong> que carrega e opera o APK e uma <strong>fila</strong> que organiza quem usa os runners. Tudo o que o site faz nos Controles também pode ser feito pela API.</p>
+
+<h2 id="o-que-e">O que é</h2>
+<div class="cards">
+  <div class="card"><h3>Runner</h3><p>Sessões de APK com toda a configuração dos Controles: aparelho, rede (lista de hosts, redirecionamento, offline, proxy), permissões e localização, overrides de método, Activities ignoradas, mocks de endpoint, limites de evento e memória. Toque, digitação, intents, screenshots PNG, limites de layout, árvore Compose, ViewModels, Logcat e rede por SSE, plugins e diagnóstico.</p></div>
+  <div class="card"><h3>Fila</h3><p>Jobs declarativos (passos: iniciar, esperar texto/testTag, tocar, digitar, screenshot, limites de layout, campo de ViewModel, Logcat, rede, plugins) e leases interativos com proxy da API do runner. Prioridades, justiça entre clientes, capacidade lida do health dos runners, retentativas, cancelamento, progresso por SSE e retenção.</p></div>
+  <div class="card"><h3>Mesma API do serviço Node</h3><p>Os caminhos e corpos JSON são os do <a href="https://github.com/madmax-dev-br/apk-lab-node-service">apk-lab-node-service</a>: um cliente escrito para um funciona no outro, e a fila de um pode usar runners do outro.</p></div>
+</div>
+
+<h2 id="arquitetura">Arquitetura</h2>
+<div class="diagram" role="img" aria-label="Clientes chamam a fila Micronaut ou o runner Micronaut; o runner abre um processo sidecar Node por sessão; o sidecar roda o Worker do APK Web Lab em worker_threads com o runtime baixado do site público.">
+<svg viewBox="0 0 860 330" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+  <rect class="box" x="10" y="30" width="150" height="70" rx="10"/><text x="85" y="60" text-anchor="middle">Clientes</text><text class="small" x="85" y="80" text-anchor="middle">curl, Java, front end</text>
+  <rect class="box accent" x="220" y="10" width="180" height="90" rx="10"/><text x="310" y="40" text-anchor="middle">Fila (Micronaut)</text><text class="small" x="310" y="60" text-anchor="middle">jobs · leases · justiça</text><text class="small" x="310" y="78" text-anchor="middle">retentativas · artefatos</text>
+  <rect class="box accent" x="220" y="160" width="180" height="110" rx="10"/><text x="310" y="190" text-anchor="middle">Runner (Micronaut)</text><text class="small" x="310" y="210" text-anchor="middle">auth · CORS · validação</text><text class="small" x="310" y="228" text-anchor="middle">limites · SSE · PNG</text><text class="small" x="310" y="246" text-anchor="middle">ciclo de vida do sidecar</text>
+  <rect class="box" x="470" y="150" width="170" height="130" rx="10"/><text x="555" y="178" text-anchor="middle">Sidecar Node 22+</text><text class="small" x="555" y="198" text-anchor="middle">1 processo por sessão</text><text class="small" x="555" y="216" text-anchor="middle">JSON lines (stdin/stdout)</text><text class="small" x="555" y="234" text-anchor="middle">CanvasKit para PNG</text><text class="small" x="555" y="252" text-anchor="middle">plugins (worker_threads)</text>
+  <rect class="box" x="690" y="150" width="160" height="130" rx="10"/><text x="770" y="178" text-anchor="middle">Worker da VM</text><text class="small" x="770" y="198" text-anchor="middle">runtime/apk-worker.js</text><text class="small" x="770" y="216" text-anchor="middle">Dalvik em JS + Wasm</text><text class="small" x="770" y="234" text-anchor="middle">(Skia, ICU, SQLite)</text><text class="small" x="770" y="252" text-anchor="middle">worker_threads</text>
+  <rect class="box" x="470" y="20" width="380" height="70" rx="10"/><text x="660" y="48" text-anchor="middle">vendor/apk-lab: runtime público fixado</text><text class="small" x="660" y="68" text-anchor="middle">fetch-runtime.mjs · commit do site + SHA-256 de cada arquivo</text>
+  <path class="line" d="M160 55 L218 55" marker-end="url(#arrow)"/>
+  <path class="line" d="M160 85 C190 85 190 200 218 200" marker-end="url(#arrow)"/>
+  <path class="line" d="M310 100 L310 158" marker-end="url(#arrow)"/><text class="small" x="318" y="134">HTTP + token</text>
+  <path class="line" d="M400 215 L468 215" marker-end="url(#arrow)"/>
+  <path class="line" d="M640 215 L688 215" marker-end="url(#arrow)"/>
+  <path class="line" d="M660 90 L660 148" marker-end="url(#arrow)"/>
+</svg>
+</div>
+<p>Cada sessão do runner é um processo <code>node sidecar/vm-host.mjs</code>. O sidecar carrega os módulos do bundle público (o mesmo que o site serve), cria o Worker da VM (<code>runtime/apk-worker.js</code>) num <code>worker_threads</code> Worker com um shim pequeno (globais de Worker, <code>fetch</code> e XHR síncrono só para arquivos do runtime) e o dirige com o próprio <code>APKWorkerClient</code> do bundle. O runner Micronaut cuida do que é de servidor: HTTP, autenticação, CORS, validação, limites, SSE, o processo e as falhas dele.</p>
+
+<h2 id="por-que-sidecar">Por que um sidecar Node</h2>
+<p>A VM do APK Web Lab é JavaScript: módulos ES, WebAssembly (CanvasKit/Skia, ICU, SQLite, zlib, codecs) e semântica de Worker. Ela não roda dentro da JVM como está. As opções eram reescrever a VM em Java (fora de questão: o comportamento vem do runtime publicado e tem de ser o mesmo do site) ou hospedá-la num processo que já entende tudo isso. O Node 22+ entende: <code>worker_threads</code>, <code>fetch</code>, WebAssembly e módulos ES, e o mesmo shim já é usado pelo serviço Node.</p>
+<ul>
+  <li><strong>Isolamento:</strong> um processo por sessão. Um crash, um loop ou falta de memória derruba só aquela sessão; o runner mostra o erro com as últimas linhas do sidecar e permite <code>POST /sessions/{id}/restart</code>.</li>
+  <li><strong>Memória:</strong> <code>--max-old-space-size</code> no processo (<code>RUNNER_SIDECAR_HEAP_MB</code>) e <code>resourceLimits</code> no Worker da VM (<code>RUNNER_VM_HEAP_MB</code>, ampliado por <code>memoryMiB</code> da sessão até <code>RUNNER_VM_HEAP_MAX_MB</code>).</li>
+  <li><strong>Ambiente limpo:</strong> o sidecar recebe só <code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code> e o diretório do runtime; nunca o <code>RUNNER_TOKEN</code> nem outras variáveis do runner.</li>
+  <li><strong>Direção futura (não implementada):</strong> GraalJS + GraalWasm poderiam hospedar a VM dentro da JVM, sem processo extra. Faltam a semântica de <code>worker_threads</code>/Worker, o desempenho de WebAssembly equivalente ao V8 e uma validação completa do runtime nesse ambiente.</li>
+</ul>
+
+<h2 id="protocolo">Protocolo do sidecar</h2>
+<p>JSON lines: uma mensagem JSON por linha, nos dois sentidos. A <code>stdout</code> do sidecar é só protocolo; tudo o que ele, a VM ou um plugin imprimem vai para a <code>stderr</code>, que o runner registra (nível DEBUG) e guarda as últimas 30 linhas para mensagens de erro.</p>
+<pre><code># runner -> sidecar (stdin)
+{"id": 7, "op": "tap", "args": {"selector": {"testTag": "salvar"}}}
+
+# sidecar -> runner (stdout)
+{"event": "ready", "protocol": 1, "revision": "93d82df0437e", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
+{"id": 7, "ok": true, "result": {"via": "semantics", "element": {...}, "snapshot": {...}}}
+{"id": 8, "ok": false, "error": {"status": 404, "code": "element-not-found", "message": "...", "details": {"activity": "..."}}}
+{"event": "logcat", "data": [{"seq": 41, "level": "W", "tag": "APKWebLab", "message": "..."}]}       # só com assinatura
+{"event": "netlog", "data": [{"seq": 3, "method": "GET", "url": "...", "status": 200, "mockId": "m-..."}]}
+{"event": "session", "name": "snapshot", "data": {"seq": 12, "activity": "..."}}
+{"event": "plugin", "data": {"id": "observar-vm", "blocks": [...]}}
+{"event": "fatal", "message": "..."}                                                              # antes de sair com erro</code></pre>
+<table>
+<tr><th>Operação</th><th>Uso</th></tr>
+<tr><td><code>init</code></td><td>id da sessão, política do operador (hosts, plugins, memória) e limites; antes de tudo.</td></tr>
+<tr><td><code>load</code></td><td><code>{apkPath, config}</code>: o APK vai como arquivo do diretório da sessão (nunca em base64 pelo pipe); a config é validada de novo pelos sanitizadores do próprio bundle.</td></tr>
+<tr><td><code>launch</code>, <code>intent</code>, <code>back</code>, <code>tap</code>, <code>type</code>, <code>scroll</code>, <code>input</code>, <code>wait</code></td><td>Navegação e entrada.</td></tr>
+<tr><td><code>snapshot</code>, <code>layoutBounds</code>, <code>elements</code>, <code>composeTree</code>, <code>screenState</code>, <code>diagnostic</code>, <code>screenshot</code>, <code>elementScreenshot</code></td><td>Leitura da tela; screenshots voltam como PNG em base64.</td></tr>
+<tr><td><code>activity</code>, <code>viewModels</code>, <code>fragments</code>, <code>inspect</code>, <code>field</code>, <code>methods</code></td><td>Inspeção da VM (as mesmas consultas dos plugins).</td></tr>
+<tr><td><code>logcat</code>, <code>network</code>, <code>subscribe</code></td><td>Leituras paginadas e assinatura dos canais de eventos.</td></tr>
+<tr><td><code>updateConfig</code>, <code>restart</code>, <code>getConfig</code>, <code>permissionRequests</code>, <code>answerPermission</code>, <code>clearAppData</code>, plugins, <code>stats</code>, <code>shutdown</code></td><td>O resto da API.</td></tr>
+</table>
+<p><strong>Limites e falhas:</strong> cada linha tem no máximo <code>RUNNER_SIDECAR_MAX_LINE_MB</code> (64 MiB) nos dois sentidos; uma requisição maior é recusada com 413 sem derrubar o sidecar, uma resposta maior vira o erro <code>response-too-large</code>, e uma linha inválida ou grande demais vinda do sidecar o encerra. Toda chamada tem timeout (<code>RUNNER_OPERATION_TIMEOUT_S</code> + margem; carga: <code>RUNNER_LOAD_TIMEOUT_S</code>); um sidecar que não responde é encerrado e a sessão fica <code>crashed</code>. Se o processo sai, as chamadas pendentes falham com <code>503 sidecar-crashed</code> (com as últimas linhas da stderr), as seguintes com <code>409 vm-not-running</code>, e <code>POST /sessions/{id}/restart</code> sobe um sidecar novo com o mesmo APK e a mesma config.</p>
+
+<h2 id="inicio-rapido">Início rápido</h2>
+<p>Requisitos: JDK 21 e Node.js 22+. O Gradle vem pelo wrapper.</p>
+<pre><code>git clone https://github.com/madmax-dev-br/apk-lab-micronaut-service.git
+cd apk-lab-micronaut-service
+
+# 1. o runtime do APK Web Lab (~114 MiB, cada arquivo conferido por SHA-256) em vendor/apk-lab
+./gradlew fetchRuntime            # ou: node sidecar/fetch-runtime.mjs
+
+# 2. o runner
+export RUNNER_TOKEN=$(openssl rand -hex 24)
+./gradlew :runner:run             # http://127.0.0.1:8081
+
+# 3. em outro terminal: a fila, com um cliente e o runner registrado
+export QUEUE_CLIENTS="eu:$(openssl rand -hex 16)" QUEUE_RUNNERS="http://127.0.0.1:8081" QUEUE_RUNNER_TOKEN=$RUNNER_TOKEN
+./gradlew :queue:run              # http://127.0.0.1:8080</code></pre>
+<pre><code>curl -s http://127.0.0.1:8081/health
+# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"93d82df0437e","maxSessions":2,"available":2,...}</code></pre>
+<p>O runtime vem do repositório público do site, <strong>no commit fixado</strong> em <code>sidecar/runtime.lock.json</code> (revisão do <code>build-info.json</code>, lista de arquivos, tamanho e SHA-256). Uma publicação nova do site não muda o que este repositório roda. Para usar outra cópia do runtime (por exemplo, um <code>dist/</code> que você construiu), aponte <code>APK_LAB_RUNTIME_DIR</code> para ela. <code>node sidecar/fetch-runtime.mjs --check</code> confere uma cópia existente; <code>--base &lt;url&gt;</code> baixa de um espelho (os hashes continuam valendo).</p>
+
+<h2 id="docker">Docker Compose</h2>
+<pre><code>export RUNNER_TOKEN=$(openssl rand -hex 24) QUEUE_CLIENT_TOKEN=$(openssl rand -hex 24)
+docker compose up --build
+curl -s -H "Authorization: Bearer $QUEUE_CLIENT_TOKEN" http://127.0.0.1:8080/stats</code></pre>
+<p>A imagem do runner é multi-stage: JDK para compilar, uma etapa Node que baixa o runtime fixado, e a imagem final com JRE 21 + o binário do Node 22, usuário sem privilégios. A fila guarda jobs e artefatos num volume (<code>QUEUE_STORE=file</code>). O runner fica só na rede interna do compose.</p>
+
+<h2 id="autenticacao">Autenticação</h2>
+<ul>
+  <li><strong>Runner:</strong> um token de operador, <code>RUNNER_TOKEN</code>. Envie <code>Authorization: Bearer &lt;token&gt;</code>; em GET também vale <code>?access_token=&lt;token&gt;</code> (o <code>EventSource</code> do navegador não envia cabeçalhos). <code>GET /health</code> e <code>GET /</code> são públicos. <code>RUNNER_AUTH=off</code> desliga a autenticação: só para uso local, escutando em 127.0.0.1.</li>
+  <li><strong>Fila:</strong> um token por cliente, <code>QUEUE_CLIENTS="alice:token-da-alice:3,bob:token-do-bob"</code> (o terceiro campo é o limite de jobs/leases simultâneos daquele cliente; o padrão é <code>QUEUE_MAX_PER_CLIENT</code>). Cada cliente vê só os próprios jobs e leases. A fila fala com os runners com <code>QUEUE_RUNNER_TOKEN</code> (ou um token por runner: <code>QUEUE_RUNNERS="http://a:8081|tokenA,http://b:8081|tokenB"</code>).</li>
+  <li>Tokens são comparados em tempo constante. Use HTTPS (um proxy reverso) fora de uma rede confiável.</li>
+</ul>
+
+<h2 id="configuracao">Configuração</h2>
+<h3>Runner</h3>
+<table>
+<tr><th>Variável</th><th>Padrão</th><th>Efeito</th></tr>
+<tr><td><code>RUNNER_HOST</code> / <code>RUNNER_PORT</code></td><td>127.0.0.1 / 8081</td><td>Endereço do servidor.</td></tr>
+<tr><td><code>RUNNER_TOKEN</code>, <code>RUNNER_AUTH</code></td><td>(obrigatório), on</td><td>Autenticação.</td></tr>
+<tr><td><code>RUNNER_CORS_ORIGINS</code></td><td>vazio</td><td>Origens que podem chamar a API pelo navegador (lista separada por vírgulas; <code>*</code> permite todas). Vazio: sem CORS.</td></tr>
+<tr><td><code>RUNNER_MAX_SESSIONS</code></td><td>2</td><td>Sessões simultâneas (cada uma é um processo Node).</td></tr>
+<tr><td><code>RUNNER_MAX_APK_MB</code>, <code>RUNNER_MAX_REQUEST_SIZE</code></td><td>200, 256MB</td><td>Tamanho do APK e do corpo HTTP.</td></tr>
+<tr><td><code>RUNNER_IDLE_TIMEOUT_S</code>, <code>RUNNER_SESSION_MAX_S</code></td><td>600, 3600</td><td>Sessão parada (streams abertos contam como uso) e idade máxima.</td></tr>
+<tr><td><code>RUNNER_SIDECAR_HEAP_MB</code></td><td>512</td><td><code>--max-old-space-size</code> do processo Node.</td></tr>
+<tr><td><code>RUNNER_VM_HEAP_MB</code>, <code>RUNNER_VM_HEAP_MAX_MB</code></td><td>2048, 6144</td><td>Heap do Worker da VM (<code>resourceLimits</code>).</td></tr>
+<tr><td><code>RUNNER_MAX_MEMORY_MIB</code></td><td>2048</td><td>Maior <code>memoryMiB</code> (orçamento Java da VM) que uma sessão pode pedir.</td></tr>
+<tr><td><code>RUNNER_LOAD_TIMEOUT_S</code>, <code>RUNNER_OPERATION_TIMEOUT_S</code></td><td>120, 45</td><td>Timeouts de carga e de operação.</td></tr>
+<tr><td><code>RUNNER_SIDECAR_START_TIMEOUT_S</code>, <code>RUNNER_SIDECAR_CALL_MARGIN_S</code>, <code>RUNNER_SIDECAR_MAX_LINE_MB</code></td><td>30, 15, 64</td><td>Protocolo do sidecar.</td></tr>
+<tr><td><code>RUNNER_ALLOWED_HOSTS</code></td><td>vazio</td><td>Política do operador: hosts que as sessões podem liberar em <code>network.allowedHosts</code> e usar como destino de <code>hostMap</code> ou proxy (<code>host</code>, <code>*.sufixo</code>, <code>host:porta</code>, <code>*</code>). Vazio: nenhum acesso real à rede; mocks continuam funcionando.</td></tr>
+<tr><td><code>RUNNER_ALLOW_PLUGINS</code></td><td>false</td><td>Plugins no servidor (veja <a href="seguranca.html#plugins">Segurança</a>). Com eles: <code>RUNNER_PLUGIN_MAX</code> (4), <code>RUNNER_PLUGIN_HEAP_MB</code> (64), <code>RUNNER_PLUGIN_BUSY_S</code> (5), <code>RUNNER_PLUGIN_MAX_RUN_S</code> (0 = sem limite), <code>RUNNER_PLUGIN_MAX_CODE_KB</code> (256).</td></tr>
+<tr><td><code>RUNNER_APP_DATA_DIR</code></td><td>vazio</td><td>Guarda os dados do app entre sessões (<code>appData.keep</code>), separados por <code>X-Client-Id</code>.</td></tr>
+<tr><td><code>APK_LAB_RUNTIME_DIR</code></td><td>vendor/apk-lab</td><td>Diretório do runtime.</td></tr>
+<tr><td><code>RUNNER_NODE</code>, <code>RUNNER_SIDECAR_SCRIPT</code>, <code>RUNNER_WORK_DIR</code></td><td>node, sidecar/vm-host.mjs, (tmp)</td><td>Executável do Node, script do sidecar, diretório dos APKs das sessões.</td></tr>
+</table>
+<h3>Fila</h3>
+<table>
+<tr><th>Variável</th><th>Padrão</th><th>Efeito</th></tr>
+<tr><td><code>QUEUE_HOST</code> / <code>QUEUE_PORT</code></td><td>127.0.0.1 / 8080</td><td>Endereço do servidor.</td></tr>
+<tr><td><code>QUEUE_CLIENTS</code>, <code>QUEUE_AUTH</code></td><td>(obrigatório), on</td><td>Clientes e tokens.</td></tr>
+<tr><td><code>QUEUE_RUNNERS</code>, <code>QUEUE_RUNNER_TOKEN</code>, <code>QUEUE_HEALTH_INTERVAL_S</code></td><td>vazio, vazio, 5</td><td>Registro de runners e intervalo do health check.</td></tr>
+<tr><td><code>QUEUE_MAX_PER_CLIENT</code>, <code>QUEUE_MAX_QUEUED_PER_CLIENT</code></td><td>2, 50</td><td>Jobs/leases simultâneos e na fila por cliente.</td></tr>
+<tr><td><code>QUEUE_MAX_ATTEMPTS</code></td><td>3</td><td>Tentativas de um job em falhas de infraestrutura.</td></tr>
+<tr><td><code>QUEUE_JOB_TIMEOUT_S</code></td><td>900</td><td>Tempo máximo de um job.</td></tr>
+<tr><td><code>QUEUE_LEASE_MAX_S</code>, <code>QUEUE_LEASE_IDLE_S</code></td><td>1800, 300</td><td>Duração máxima de um lease e inatividade antes de expirar.</td></tr>
+<tr><td><code>QUEUE_RESULT_TTL_S</code></td><td>86400</td><td>Retenção de jobs terminados e seus artefatos.</td></tr>
+<tr><td><code>QUEUE_STORE</code>, <code>QUEUE_STORE_FILE</code>, <code>QUEUE_DATA_DIR</code></td><td>memory, (data/queue/queue.json), data/queue</td><td>Persistência (<code>memory</code> ou <code>file</code>), APKs e artefatos.</td></tr>
+<tr><td><code>QUEUE_APK_URL_HOSTS</code>, <code>QUEUE_MAX_APK_MB</code></td><td>vazio, 200</td><td>Hosts permitidos para <code>apkUrl</code> (vazio: nenhum) e tamanho máximo.</td></tr>
+<tr><td><code>QUEUE_CORS_ORIGINS</code>, <code>QUEUE_ALLOW_PLUGINS</code></td><td>vazio, false</td><td>CORS da API da fila; passos e configs com plugins.</td></tr>
+</table>
+
+<h2 id="testes">Testes</h2>
+<pre><code>./gradlew test     # unitários: sidecar falso, runners falsos; sem rede, sem APKs</code></pre>
+<p>Os testes unitários cobrem a fila (prioridade, justiça, capacidade, retentativas, cancelamento, timeout, expiração de leases, retenção, store em arquivo), validação, autenticação, CORS, plugins desligados por padrão e o protocolo do sidecar com um sidecar falso (crash, timeout, linha grande demais, linha inválida, restart). Os testes de ponta a ponta rodam só com as duas variáveis:</p>
+<pre><code>APK_LAB_RUNTIME_DIR=$PWD/vendor/apk-lab APK_LAB_TEST_APK_DIR=/caminho/para/apks-de-teste ./gradlew test</code></pre>
+<p>Eles usam APKs sintéticos de teste (uma sonda de rede, um app Compose de exemplo), nunca APKs de terceiros, e não acessam a internet: as respostas vêm de mocks e o redirecionamento de host vai para um servidor local. O CI do GitHub roda só os unitários.</p>
+
+<h2 id="node">Relação com o serviço Node</h2>
+<p>O <a href="https://github.com/madmax-dev-br/apk-lab-node-service">apk-lab-node-service</a> roda a VM dentro do próprio processo Node do serviço. Este repositório tem a mesma API (caminhos, corpos, formato de erro <code>{"error": {"code", "message", "details"}}</code>, eventos SSE) e os mesmos passos de job; as diferenças:</p>
+<ul>
+  <li>Um processo sidecar por sessão (isolamento de crash e de memória por processo) em vez de um Worker por sessão dentro do serviço.</li>
+  <li>Configuração validada duas vezes: records Java com Bean Validation (chaves desconhecidas são erro 400) e depois os sanitizadores do bundle no sidecar.</li>
+  <li>Cabeçalhos HTTP são Latin-1: em <code>X-APK-Config</code> e <code>X-Job</code> use JSON ASCII ou base64url (os dois serviços aceitam).</li>
+</ul>
+</article>
+</main>
+<footer><div>Código sob licença MIT. O runtime baixado mantém as próprias licenças (<code>vendor/apk-lab/THIRD_PARTY.md</code>). APIs Android não implementadas falham com erro explícito; nada é simulado como sucesso.</div></footer>
+</body>
+</html>
