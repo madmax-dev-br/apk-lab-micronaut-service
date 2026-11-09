@@ -111,6 +111,8 @@ public final class RunnerSession {
 
     /** One protocol call; sidecar errors become API errors (status, code, message, details of the lab). */
     public JsonNode call(String op, JsonNode args) { return call(op, args, operationTimeout); }
+    /** How long one sidecar operation may take (runner.operation-timeout-seconds). */
+    public Duration operationTimeout() { return operationTimeout; }
 
     public JsonNode call(String op, JsonNode args, Duration timeout) {
         if (closed()) throw ApiException.conflict("session-closed", "The session is closed" + (closeReason != null ? " (" + closeReason + ")" : ""));

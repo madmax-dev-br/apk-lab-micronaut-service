@@ -43,8 +43,8 @@
 
 <h2 id="o-que-e">O que é</h2>
 <div class="cards">
-  <div class="card"><h3>Runner</h3><p>Sessões de APK com toda a configuração dos Controles: aparelho, rede (lista de hosts, redirecionamento, offline, proxy), permissões e localização, overrides de método, Activities ignoradas, mocks de endpoint, limites de evento e memória. Toque, digitação, intents, <strong>Recriar / Reabrir</strong> a Activity, a <strong>Tela pronta</strong> (espera, evento SSE e captura só quando a tela assentou), screenshots PNG, limites de layout, árvore Compose, ViewModels, Logcat e rede por SSE, plugins e diagnóstico.</p></div>
-  <div class="card"><h3>Fila</h3><p>Jobs declarativos (passos: iniciar, esperar texto/testTag ou a tela pronta, recarregar a tela, tocar, digitar, screenshot, limites de layout, campo de ViewModel, Logcat, rede, plugins) e leases interativos com proxy da API do runner. Prioridades, justiça entre clientes, capacidade lida do health dos runners, retentativas, cancelamento, progresso por SSE e retenção.</p></div>
+  <div class="card"><h3>Runner</h3><p>Sessões de APK com toda a configuração dos Controles: aparelho, rede (lista de hosts, redirecionamento, offline, proxy), permissões e localização, overrides de método, Activities ignoradas, mocks de endpoint, limites de evento e memória. Toque, digitação, intents, <strong>Recriar / Reabrir</strong> a Activity, a <strong>Tela pronta</strong> (espera, evento SSE e captura só quando a tela assentou), screenshots PNG, limites de layout, árvore Compose, ViewModels, <strong>estado fora da tela</strong> (campos estáticos de classes já inicializadas, classes pelo nome, objetos vivos de um tipo e quem os segura), Logcat e rede por SSE, plugins e diagnóstico.</p></div>
+  <div class="card"><h3>Fila</h3><p>Jobs declarativos (passos: iniciar, esperar texto/testTag ou a tela pronta, recarregar a tela, tocar, digitar, screenshot, limites de layout, campo de ViewModel, campos estáticos e objetos vivos de um tipo, Logcat, rede, plugins) e leases interativos com proxy da API do runner. Prioridades, justiça entre clientes, capacidade lida do health dos runners, retentativas, cancelamento, progresso por SSE e retenção.</p></div>
   <div class="card"><h3>Mesma API do serviço Node</h3><p>Os caminhos e corpos JSON são os do <a href="https://github.com/madmax-dev-br/apk-lab-node-service">apk-lab-node-service</a>: um cliente escrito para um funciona no outro, e a fila de um pode usar runners do outro.</p></div>
 </div>
 
@@ -83,7 +83,7 @@
 {"id": 7, "op": "tap", "args": {"selector": {"testTag": "salvar"}}}
 
 # sidecar -> runner (stdout)
-{"event": "ready", "protocol": 1, "revision": "79526b6931c6", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
+{"event": "ready", "protocol": 1, "revision": "308c7a12ce00", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
 {"id": 7, "ok": true, "result": {"via": "semantics", "element": {...}, "snapshot": {...}}}
 {"id": 8, "ok": false, "error": {"status": 404, "code": "element-not-found", "message": "...", "details": {"activity": "..."}}}
 {"event": "logcat", "data": [{"seq": 41, "level": "W", "tag": "APKWebLab", "message": "..."}]}       # só com assinatura
@@ -97,7 +97,7 @@
 <tr><td><code>load</code></td><td><code>{apkPath, config}</code>: o APK vai como arquivo do diretório da sessão (nunca em base64 pelo pipe); a config é validada de novo pelos sanitizadores do próprio bundle.</td></tr>
 <tr><td><code>launch</code>, <code>intent</code>, <code>back</code>, <code>tap</code>, <code>type</code>, <code>scroll</code>, <code>input</code>, <code>wait</code></td><td>Navegação e entrada.</td></tr>
 <tr><td><code>snapshot</code>, <code>layoutBounds</code>, <code>elements</code>, <code>composeTree</code>, <code>screenState</code>, <code>diagnostic</code>, <code>screenshot</code>, <code>elementScreenshot</code></td><td>Leitura da tela; screenshots voltam como PNG em base64.</td></tr>
-<tr><td><code>activity</code>, <code>viewModels</code>, <code>fragments</code>, <code>inspect</code>, <code>field</code>, <code>methods</code></td><td>Inspeção da VM (as mesmas consultas dos plugins).</td></tr>
+<tr><td><code>activity</code>, <code>viewModels</code>, <code>fragments</code>, <code>inspect</code>, <code>field</code>, <code>methods</code>, <code>classes</code>, <code>statics</code>, <code>staticField</code>, <code>instances</code>, <code>referrers</code></td><td>Inspeção da VM (as mesmas consultas dos plugins). <code>instances</code> e <code>referrers</code> juntam as páginas curtas da varredura do heap no sidecar.</td></tr>
 <tr><td><code>logcat</code>, <code>network</code>, <code>subscribe</code></td><td>Leituras paginadas e assinatura dos canais de eventos.</td></tr>
 <tr><td><code>updateConfig</code>, <code>restart</code>, <code>getConfig</code>, <code>permissionRequests</code>, <code>answerPermission</code>, <code>clearAppData</code>, plugins, <code>stats</code>, <code>shutdown</code></td><td>O resto da API.</td></tr>
 </table>
@@ -119,7 +119,7 @@ export RUNNER_TOKEN=$(openssl rand -hex 24)
 export QUEUE_CLIENTS="eu:$(openssl rand -hex 16)" QUEUE_RUNNERS="http://127.0.0.1:8081" QUEUE_RUNNER_TOKEN=$RUNNER_TOKEN
 ./gradlew :queue:run              # http://127.0.0.1:8080</code></pre>
 <pre><code>curl -s http://127.0.0.1:8081/health
-# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"79526b6931c6","maxSessions":2,"available":2,
+# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"308c7a12ce00","maxSessions":2,"available":2,
 #  "memory":{"budgetMiB":1024,"maxHeapObjects":671088,"source":"navigator.deviceMemory=8","deviceMemory":8.0,"workerHeapMb":3072},
 #  "network":{"allowedHosts":["*"],"allowPrivateNetwork":false},"appData":true,...}</code></pre>
 <p>O runtime vem do repositório público do site, <strong>no commit fixado</strong> em <code>sidecar/runtime.lock.json</code> (revisão do <code>build-info.json</code>, lista de arquivos, tamanho e SHA-256). Uma publicação nova do site não muda o que este repositório roda. Para usar outra cópia do runtime (por exemplo, um <code>dist/</code> que você construiu), aponte <code>APK_LAB_RUNTIME_DIR</code> para ela. <code>node sidecar/fetch-runtime.mjs --check</code> confere uma cópia existente; <code>--base &lt;url&gt;</code> baixa de um espelho (os hashes continuam valendo).</p>
@@ -201,7 +201,7 @@ curl -s -H "Authorization: Bearer $QUEUE_CLIENT_TOKEN" http://127.0.0.1:8080/sta
 
 <h2 id="testes">Testes</h2>
 <pre><code>./gradlew test     # unitários: sidecar falso, runners falsos; sem rede, sem APKs</code></pre>
-<p>Os testes unitários cobrem a fila (prioridade, justiça, capacidade, retentativas, cancelamento, timeout, expiração de leases, retenção, store em arquivo), validação, autenticação, CORS, plugins desligados por padrão, os padrões iguais ao site (orçamento de memória, política de rede, dados do app, <code>rasterScale</code>), o protocolo do sidecar com um sidecar falso (crash, timeout, linha grande demais, linha inválida, restart) e os testes do próprio sidecar (<code>node --test sidecar/test/</code>: <code>navigator.deviceMemory</code>, recusa de alvos privados, config padrão, <code>raster-settings</code> ao vivo). Os testes de ponta a ponta rodam só com as duas variáveis:</p>
+<p>Os testes unitários cobrem a fila (prioridade, justiça, capacidade, retentativas, cancelamento, timeout, expiração de leases, retenção, store em arquivo), validação, autenticação, CORS, plugins desligados por padrão, os padrões iguais ao site (orçamento de memória, política de rede, dados do app, <code>rasterScale</code>), o protocolo do sidecar com um sidecar falso (crash, timeout, linha grande demais, linha inválida, restart) e os testes do próprio sidecar (<code>node --test sidecar/test/</code>: <code>navigator.deviceMemory</code>, recusa de alvos privados, config padrão, <code>raster-settings</code> ao vivo, paginação de <code>instances</code> / <code>referrers</code> e status dos erros das consultas). Os testes de ponta a ponta rodam só com as duas variáveis:</p>
 <pre><code>APK_LAB_RUNTIME_DIR=$PWD/vendor/apk-lab APK_LAB_TEST_APK_DIR=/caminho/para/apks-de-teste ./gradlew test</code></pre>
 <p>Eles usam APKs sintéticos de teste (uma sonda de rede, um app Compose de exemplo), nunca APKs de terceiros, e não acessam a internet: as respostas vêm de mocks e o redirecionamento de host vai para um servidor local (com <code>RUNNER_ALLOW_PRIVATE_NETWORK</code> ligado nesse teste; outro teste confere que, sem ele, o mesmo destino é recusado). O CI do GitHub roda só os unitários.</p>
 

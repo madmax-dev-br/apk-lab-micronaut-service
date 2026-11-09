@@ -106,6 +106,28 @@ class QueueServiceTest {
     }
 
     @Test
+    void stateOutsideTheScreenStepsReachTheRunner() {
+        FakeRunner runner = new FakeRunner("r1", 1);
+        QueueService queue = service(settings(), new MemoryStore(), runner);
+        List<Step> steps = List.of(Step.of("launch"), Step.builder("classes").match("Contexto Global").limit(5).initialized(true).build(),
+                Step.builder("statics").className("com.exemplo.di.ContextoGlobal").build(),
+                Step.builder("staticField").className("com.exemplo.di.ContextoGlobal").path(List.of("registro", "com.exemplo.Tela::id", "valor")).build(),
+                Step.builder("instances").className("com.exemplo.tela.Armazenamento").subclasses(false).limit(5).maxPages(3).build(),
+                Step.builder("referrers").handle("h9.j1").after(40).build(),
+                Step.builder("field").handle("h9.j1").path(List.of("dados", "a.b")).build());
+        QueueItem item = queue.submitJob("alice", APK, job(steps, null), JSON.createObjectNode());
+        await(() -> "succeeded".equals(item.state) || "failed".equals(item.state), "the job");
+        assertEquals("succeeded", item.state, () -> String.valueOf(item.error));
+        assertTrue(runner.calls.contains("GET /classes?match=Contexto+Global&limit=5&initialized=1"), runner.calls::toString);
+        assertEquals(List.of("POST /statics {\"className\":\"com.exemplo.di.ContextoGlobal\",\"options\":{}}",
+                "POST /static-field {\"className\":\"com.exemplo.di.ContextoGlobal\",\"path\":[\"registro\",\"com.exemplo.Tela::id\",\"valor\"],\"options\":{}}",
+                "POST /instances {\"className\":\"com.exemplo.tela.Armazenamento\",\"subclasses\":false,\"limit\":5,\"maxPages\":3}",
+                "POST /referrers {\"handle\":\"h9.j1\",\"after\":40}",
+                "POST /field {\"handle\":\"h9.j1\",\"path\":[\"dados\",\"a.b\"],\"options\":{}}"),
+                runner.bodies.stream().filter(b -> b.startsWith("POST /statics") || b.startsWith("POST /static-field") || b.startsWith("POST /instances") || b.startsWith("POST /referrers") || b.startsWith("POST /field")).toList());
+    }
+
+    @Test
     void runnerCapacityIsRespected() {
         FakeRunner runner = new FakeRunner("r1", 1);
         runner.stepDelayMs = 150;

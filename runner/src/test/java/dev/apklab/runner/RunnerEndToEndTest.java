@@ -218,6 +218,43 @@ class RunnerEndToEndTest implements TestPropertyProvider {
         System.out.printf("[e2e] plugin: status %s, badge %s, %s%n", plugin.path("status").asText(), plugin.path("badge").asText(), plugin.path("blocks").get(0));
     }
 
+    // ---- state outside the screen -------------------------------------------------------------------------------------------------------------------------------
+    @Test
+    void staticFieldsClassesInstancesAndReferrers() throws IOException {
+        String id = create("compose-approvals-debug.apk", "{\"launch\": true}").path("session").path("id").asText();
+        ok(http.post("/sessions/" + id + "/wait", Map.of("selector", Map.of("text", "Central de aprovações"), "timeoutMs", 20000)));
+        // Compose keeps its running recomposers in a static StateFlow of Recomposer (its companion's property)
+        String recomposer = "androidx.compose.runtime.Recomposer";
+        JsonNode classes = ok(http.get("/sessions/" + id + "/classes?match=" + java.net.URLEncoder.encode("runtime.Recomposer", StandardCharsets.UTF_8) + "&initialized=1")).json();
+        boolean listed = false;
+        for (JsonNode item : classes.path("items")) listed |= recomposer.equals(item.path("className").asText()) && "initialized".equals(item.path("status").asText());
+        assertTrue(listed, classes.toString());
+        JsonNode statics = ok(http.post("/sessions/" + id + "/statics", Map.of("className", recomposer))).json();
+        assertEquals("StateFlow", statics.path("fields").path("_runningRecomposers").path("$kind").asText(), statics.toString());
+        JsonNode viaArray = ok(http.post("/sessions/" + id + "/static-field", Map.of("className", recomposer, "path", List.of("_runningRecomposers", "value")))).json();
+        JsonNode viaString = ok(http.post("/sessions/" + id + "/static-field", Map.of("className", recomposer, "path", "_runningRecomposers.value"))).json();
+        assertFalse(viaArray.path("$handle").asText().isEmpty(), viaArray.toString());
+        assertEquals(viaString.path("$handle").asText(), viaArray.path("$handle").asText(), "an array path reads the same value as the dotted string");
+        JsonNode instances = ok(http.post("/sessions/" + id + "/instances", Map.of("className", recomposer))).json();
+        assertTrue(instances.path("done").asBoolean(), instances.toString());
+        assertEquals(1, instances.path("items").size(), instances.toString());
+        JsonNode referrers = ok(http.post("/sessions/" + id + "/referrers", Map.of("handle", instances.path("items").get(0).path("handle").asText(), "limit", 200))).json();
+        boolean viaOuter = false;
+        for (JsonNode item : referrers.path("items")) viaOuter |= "this$0".equals(item.path("via").asText());
+        assertTrue(viaOuter, "an inner object holds the Recomposer by this$0: " + referrers);
+        JsonNode paged = ok(http.post("/sessions/" + id + "/instances", Map.of("className", "java.lang.Object", "limit", 3))).json();
+        assertEquals(3, paged.path("items").size());
+        assertFalse(paged.path("done").asBoolean(), paged.toString());
+        assertTrue(paged.path("next").asLong() > 0, paged.toString());
+        TestHttp.Response missing = http.post("/sessions/" + id + "/statics", Map.of("className", "dev.nowhere.Missing"));
+        assertEquals(404, missing.status(), String.valueOf(missing.json()));
+        assertEquals("no-class", missing.code());
+        assertEquals(400, http.get("/sessions/" + id + "/classes").status(), "classes needs match");
+        assertEquals(400, http.post("/sessions/" + id + "/static-field", Map.of("className", recomposer, "path", Map.of("x", 1))).status(), "a path is a string or an array");
+        System.out.printf("[e2e] state outside the screen: %d classes matched, Recomposer instances scanned %d records in %d pages%n",
+                classes.path("matched").asInt(), instances.path("scanned").asLong(), instances.path("pages").asInt());
+    }
+
     // ---- "Tela pronta" and "Recriar / Reabrir" -----------------------------------------------------------------------------------------------------------------
     private JsonNode appViewModel(String id) {
         for (JsonNode model : ok(http.get("/sessions/" + id + "/view-models")).json()) if (!model.path("library").asBoolean()) return model;

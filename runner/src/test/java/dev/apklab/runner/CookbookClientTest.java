@@ -28,7 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Recipes of the documentation, as published (Micronaut HttpClient): 1 (a session created with an endpoint mock, the mock in the network log), 16 (recreate keeps the
- * ViewModel, reopen creates a new one) and 17 (wait for "Tela pronta" and take the screenshot).
+ * ViewModel, reopen creates a new one), 17 (wait for "Tela pronta" and take the screenshot) and 18 (state in a static field: classes, statics, instances, referrers,
+ * static-field with a path array).
  */
 @MicronautTest(environments = "e2e")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -142,6 +143,36 @@ class CookbookClientTest implements TestPropertyProvider {
             http.retrieve(HttpRequest.POST("/sessions/" + id + "/tap", Map.of("selector", Map.of("text", "Load"))).bearerAuth(token), JsonNode.class);
             JsonNode both = http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true, "selector", Map.of("textContains", "Ana"), "timeoutMs", 15000)).bearerAuth(token), JsonNode.class);
             assertTrue(both.path("ready").asBoolean() && both.path("element").isObject(), both.toString());
+        }
+    }
+
+    @Test
+    void recipeEighteenStateInAStaticField() throws Exception {
+        String token = "cookbook-token";
+        byte[] apk = Files.readAllBytes(Path.of(System.getenv("APK_LAB_TEST_APK_DIR")).resolve("compose-approvals-debug.apk"));
+        // the documented recipe uses made-up classes; the synthetic Compose app has Compose's own Recomposer, whose companion keeps a static StateFlow
+        String classe = "androidx.compose.runtime.Recomposer";
+        try (HttpClient client = HttpClient.create(server.getURL())) {
+            BlockingHttpClient http = client.toBlocking();
+            String id = criar(http, token, apk, "{\"launch\": true}");
+            http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true)).bearerAuth(token), JsonNode.class);
+            // ---- begin: code of the cookbook (recipe 18) ----
+            JsonNode classes = http.retrieve(HttpRequest.GET("/sessions/" + id + "/classes?match=Recomposer&initialized=1").bearerAuth(token), JsonNode.class);
+            JsonNode estaticos = http.retrieve(HttpRequest.POST("/sessions/" + id + "/statics", Map.of("className", classe)).bearerAuth(token), JsonNode.class);
+            JsonNode achados = http.retrieve(HttpRequest.POST("/sessions/" + id + "/instances", Map.of("className", classe, "limit", 5)).bearerAuth(token), JsonNode.class);
+            List<JsonNode> campos = new java.util.ArrayList<>();
+            for (JsonNode item : achados.path("items"))
+                campos.add(http.retrieve(HttpRequest.POST("/sessions/" + id + "/field", Map.of("handle", item.path("handle").asText(), "path", "", "options", Map.of("depth", 1))).bearerAuth(token), JsonNode.class));
+            JsonNode quem = http.retrieve(HttpRequest.POST("/sessions/" + id + "/referrers", Map.of("handle", achados.path("items").get(0).path("handle").asText())).bearerAuth(token), JsonNode.class);
+            JsonNode valor = http.retrieve(HttpRequest.POST("/sessions/" + id + "/static-field",
+                    Map.of("className", classe, "path", List.of("_runningRecomposers", "value"))).bearerAuth(token), JsonNode.class);
+            // ---- end ----
+            assertTrue(classes.path("matched").asInt() >= 1, classes.toString());
+            assertEquals("StateFlow", estaticos.path("fields").path("_runningRecomposers").path("$kind").asText(), estaticos.toString());
+            assertEquals(1, achados.path("items").size(), achados.toString());
+            assertEquals(classe, campos.get(0).path("$type").asText(), campos.get(0).toString());
+            assertTrue(quem.path("items").size() >= 1, quem.toString());
+            assertFalse(valor.path("$handle").asText().isEmpty(), valor.toString());
         }
     }
 }

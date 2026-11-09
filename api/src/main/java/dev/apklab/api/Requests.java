@@ -68,7 +68,36 @@ public final class Requests {
 
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Field(@NotBlank @Size(max = 200) String handle, @Nullable @Size(max = 2000) String path, @Nullable Map<String, Object> options) {}
+    public record Field(@NotBlank @Size(max = 200) String handle, @Nullable Object path, @Nullable Map<String, Object> options) {}
+
+    /** Static fields of a class the app already initialized (a Kotlin object, a companion, a singleton); a query never runs its static initializer. */
+    @Introspected
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Statics(@NotBlank @Size(max = 500) String className, @Nullable Map<String, Object> options) {}
+
+    /** One value by path from a static field: path is a dotted string or an array of parts (a part with dots, such as a map key). */
+    @Introspected
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record StaticField(@NotBlank @Size(max = 500) String className, @Nullable Object path, @Nullable Map<String, Object> options) {}
+
+    /** Live objects of a type (subclasses too unless subclasses is false), the heap scanned in the runtime's short pages. limit (50, max 500), maxPages (100, max 500) and budgetMs are clamped. */
+    @Introspected
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Instances(@NotBlank @Size(max = 500) String className, @Nullable Boolean subclasses, @Nullable Integer limit, @Nullable Long after,
+                            @Nullable Integer maxPages, @Nullable Integer budgetMs) {}
+
+    /** Static fields and objects that hold an object (handle), with the field they hold it by (via). */
+    @Introspected
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Referrers(@NotBlank @Size(max = 200) String handle, @Nullable Integer limit, @Nullable Long after, @Nullable Integer maxPages, @Nullable Integer budgetMs) {}
+
+    /** A path of /field and /static-field: absent, a dotted string, or an array of at most 32 parts (strings or numbers). */
+    public static boolean isPath(@Nullable Object path) {
+        if (path == null) return true;
+        if (path instanceof String text) return text.length() <= 2000;
+        if (path instanceof List<?> parts) return parts.size() <= 32 && parts.stream().allMatch(part -> (part instanceof String text && text.length() <= 2000) || part instanceof Number);
+        return false;
+    }
 
     @Introspected
     public record PermissionAnswer(@NotNull @Pattern(regexp = "allow|once|deny|dismiss") String answer) {}

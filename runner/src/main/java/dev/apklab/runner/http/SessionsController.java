@@ -270,7 +270,52 @@ public class SessionsController {
     public JsonNode inspect(@PathVariable String id, @Valid @Body Requests.Inspect body) { return call(id, "inspect", body); }
 
     @Post("/{id}/field")
-    public JsonNode field(@PathVariable String id, @Valid @Body Requests.Field body) { return call(id, "field", body); }
+    public JsonNode field(@PathVariable String id, @Valid @Body Requests.Field body) {
+        if (!Requests.isPath(body.path())) throw ApiException.badRequest("field needs { handle, path (string or array of strings), options? }");
+        return call(id, "field", body);
+    }
+
+    // state outside the screen: static fields (a Kotlin object, a companion, a singleton, a dependency-injection container), classes by name, instances of a type,
+    // who holds an object. All read-only: a query never runs <clinit> or a method of the app. Errors: 404 no-class, 409 not-initialized, 400 bad-class / bad-args / bad-path.
+    @Get("/{id}/classes")
+    public JsonNode classes(@PathVariable String id, @Nullable @QueryValue String match, @Nullable @QueryValue String limit, @Nullable @QueryValue String initialized) {
+        String text = match == null ? "" : match.length() > 200 ? match.substring(0, 200) : match;
+        if (text.isEmpty()) throw ApiException.badRequest("classes needs ?match=part of the name or /regex/");
+        ObjectNode args = mapper.createObjectNode().put("match", text).put("initialized", truthy(initialized, false));
+        if (limit != null && !limit.isBlank()) {
+            try { args.put("limit", Math.max(1, Math.min(1000, (int) Double.parseDouble(limit.trim())))); }
+            catch (NumberFormatException e) { throw ApiException.badRequest("not a number: " + limit); }
+        }
+        return sessions.get(id).call("classes", args);
+    }
+
+    @Post("/{id}/statics")
+    public JsonNode statics(@PathVariable String id, @Valid @Body Requests.Statics body) { return call(id, "statics", body); }
+
+    @Post("/{id}/static-field")
+    public JsonNode staticField(@PathVariable String id, @Valid @Body Requests.StaticField body) {
+        if (!Requests.isPath(body.path())) throw ApiException.badRequest("static-field needs { className, path (string or array of strings), options? }");
+        return call(id, "staticField", body);
+    }
+
+    /** { items, scanned, done, next, pages }: the sidecar walks the runtime's pages until limit (50) items, the end of the heap or maxPages (100); next continues (after). */
+    @Post("/{id}/instances")
+    public JsonNode instances(@PathVariable String id, @Valid @Body Requests.Instances body) {
+        RunnerSession session = sessions.get(id);
+        return session.call("instances", mapper.valueToTree(body), scanTimeout(session, body.maxPages(), body.budgetMs()));
+    }
+
+    @Post("/{id}/referrers")
+    public JsonNode referrers(@PathVariable String id, @Valid @Body Requests.Referrers body) {
+        RunnerSession session = sessions.get(id);
+        return session.call("referrers", mapper.valueToTree(body), scanTimeout(session, body.maxPages(), body.budgetMs()));
+    }
+
+    /** A heap scan takes up to maxPages pages of budgetMs each (the runtime's 40 ms by default), between VM events: the operation timeout plus that. */
+    private static java.time.Duration scanTimeout(RunnerSession session, @Nullable Integer maxPages, @Nullable Integer budgetMs) {
+        int pages = maxPages == null || maxPages < 1 ? 100 : Math.min(500, maxPages), budget = budgetMs == null || budgetMs < 1 ? 40 : Math.min(200, budgetMs);
+        return session.operationTimeout().plusMillis((long) pages * (budget + 60));
+    }
 
     @Get("/{id}/methods")
     public JsonNode methods(@PathVariable String id, @Nullable @QueryValue String query) {

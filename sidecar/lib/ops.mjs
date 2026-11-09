@@ -11,6 +11,8 @@ const INPUT_TYPES = ['click', 'input', 'check', 'focus', 'press', 'scroll', 'scr
 const INTENT_KEYS = ['action', 'data', 'category', 'categories', 'extras', 'type', 'component', 'flags'];
 const num = (value, fallback, min, max) => { if (value === null || value === undefined || value === '') return fallback; const n = Number(value); if (!Number.isFinite(n)) throw badRequest(`not a number: ${value}`); return Math.min(max, Math.max(min, n)); };
 const conflict = (code, message) => new HttpError(409, code, message);
+/** A path of /field and /static-field: a dotted string, or an array of parts when a part has dots (a map key). */
+export const isPath = path => path === undefined || path === null || typeof path === 'string' || (Array.isArray(path) && path.length <= 32 && path.every(part => typeof part === 'string' || typeof part === 'number'));
 /** The runner's policy when init does not say otherwise: every public host (private targets refused unless allowPrivateNetwork), no plugins. */
 const DEFAULT_POLICY = Object.freeze({ allowedHosts: ['*'], allowPrivateNetwork: false, pluginsAllowed: false, maxPlugins: 4, maxPluginCodeBytes: 256 * 1024, maxMemoryMiB: 2048 });
 
@@ -140,7 +142,13 @@ export function createOps({ bundle, painter, rasterStats, send, log, readApk }) 
     viewModels: async () => (await need().pluginQuery('viewModels', {})).value,
     fragments: async () => (await need().pluginQuery('fragments', {})).value,
     inspect: async args => { if (typeof args.handle !== 'string') throw badRequest('inspect needs { handle, options? }'); return (await need().pluginQuery('inspect', { handle: args.handle, options: args.options ?? {} })).value; },
-    field: async args => { if (typeof args.handle !== 'string' || typeof (args.path ?? '') !== 'string') throw badRequest('field needs { handle, path, options? }'); return (await need().pluginQuery('field', { handle: args.handle, path: args.path ?? '', options: args.options ?? {} })).value; },
+    field: async args => { if (typeof args.handle !== 'string' || !isPath(args.path)) throw badRequest('field needs { handle, path (string or array of strings), options? }'); return (await need().pluginQuery('field', { handle: args.handle, path: args.path ?? '', options: args.options ?? {} })).value; },
+    // state outside the screen: static fields (a Kotlin object, a companion, a singleton, a dependency-injection container), classes by name, instances of a type, who holds an object
+    classes: async args => { const match = String(args.match ?? '').slice(0, 200); if (!match) throw badRequest('classes needs ?match=part of the name or /regex/'); return (await need().pluginQuery('classes', { match, limit: num(args.limit, 100, 1, 1000), initialized: args.initialized === true })).value; },
+    statics: async args => { if (typeof args.className !== 'string') throw badRequest('statics needs { className, options? }'); return (await need().pluginQuery('statics', { className: args.className, options: args.options ?? {} })).value; },
+    staticField: async args => { if (typeof args.className !== 'string' || !isPath(args.path)) throw badRequest('static-field needs { className, path (string or array of strings), options? }'); return (await need().pluginQuery('staticField', { className: args.className, path: args.path ?? '', options: args.options ?? {} })).value; },
+    instances: async args => { if (typeof args.className !== 'string') throw badRequest('instances needs { className, subclasses?, limit?, after?, maxPages? }'); return need().pagedQuery('instances', { className: args.className, subclasses: args.subclasses !== false }, args); },
+    referrers: async args => { if (typeof args.handle !== 'string') throw badRequest('referrers needs { handle, limit?, after?, maxPages? }'); return need().pagedQuery('referrers', { handle: args.handle }, args); },
     methods: args => need().searchMethods({ query: String(args.query ?? '').slice(0, 200) }),
 
     logcat: args => need().readLogcat({ since: num(args.since, -1, -1, Number.MAX_SAFE_INTEGER), limit: num(args.limit, 500, 1, 5000), level: args.level ?? null, tag: args.tag ?? null, contains: args.contains ?? null }),

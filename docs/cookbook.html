@@ -41,6 +41,7 @@
   <a href="#r15">15. CORS</a>
   <a href="#r16">16. Recarregar a tela</a>
   <a href="#r17">17. Tela pronta e print</a>
+  <a href="#r18">18. Estado num campo estático</a>
 </aside>
 <article>
 <h1>Receitas</h1>
@@ -418,6 +419,30 @@ do {
 } while (!List.of("succeeded", "failed", "cancelled").contains(resultado.path("state").asText()));
 byte[] print = fila.retrieve(HttpRequest.GET("/jobs/" + jobId + "/artifacts/pronta.png").bearerAuth(cliente), byte[].class);</code></pre>
 <p>Num plugin (exige <code>RUNNER_ALLOW_PLUGINS=true</code>): <code>const tela = await lab.waitReady(); lab.ui.image(await lab.screenshot(), {caption: tela.activity});</code>, ou o modelo "Print na tela pronta", que usa <code>lab.on('ready', ...)</code>.</p>
+
+<h2 id="r18">18. Estado guardado num campo estático (contêiner de injeção, singleton)</h2>
+<p>Quando o estado não está num ViewModel da tela: ache a classe que guarda o estático e leia o caminho até o valor, ou ache os objetos pelo tipo e descubra quem os segura. Tudo é somente leitura: nenhuma consulta chama métodos do app nem roda o <code>&lt;clinit&gt;</code> de uma classe que o app ainda não inicializou (ela aparece como <code>"not-initialized"</code>, e <code>static-field</code> nela dá 409). Os nomes são de exemplo.</p>
+<pre><code>curl -s -H "Authorization: Bearer $T" "$R/sessions/$S/classes?match=Contexto&amp;initialized=1" | jq '.items[] | {className, status}'
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d '{"className": "com.exemplo.di.ContextoGlobal", "options": {"depth": 2}}' $R/sessions/$S/statics
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d '{"className": "com.exemplo.tela.Armazenamento", "limit": 5}' $R/sessions/$S/instances | tee instancias.json | jq '{done, next, n: (.items | length)}'
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d "{\"handle\": $(jq '.items[0].handle' instancias.json)}" $R/sessions/$S/referrers | jq '.items[] | {kind, className, via}'      # o caminho até a raiz
+# uma parte do caminho com pontos (a chave de um mapa): path como array
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d '{"className": "com.exemplo.di.ContextoGlobal", "path": ["registro", "com.exemplo.Tela::id", "valor"]}' $R/sessions/$S/static-field</code></pre>
+<span class="lang">Java</span>
+<pre><code>JsonNode classes = http.retrieve(HttpRequest.GET("/sessions/" + id + "/classes?match=Contexto&amp;initialized=1").bearerAuth(token), JsonNode.class);
+JsonNode estaticos = http.retrieve(HttpRequest.POST("/sessions/" + id + "/statics", Map.of("className", "com.exemplo.di.ContextoGlobal")).bearerAuth(token), JsonNode.class);
+JsonNode achados = http.retrieve(HttpRequest.POST("/sessions/" + id + "/instances", Map.of("className", "com.exemplo.tela.Armazenamento", "limit", 5)).bearerAuth(token), JsonNode.class);
+for (JsonNode item : achados.path("items"))
+    System.out.println(http.retrieve(HttpRequest.POST("/sessions/" + id + "/field", Map.of("handle", item.path("handle").asText(), "path", "dados", "options", Map.of("depth", 2))).bearerAuth(token), JsonNode.class));
+JsonNode quem = http.retrieve(HttpRequest.POST("/sessions/" + id + "/referrers", Map.of("handle", achados.path("items").get(0).path("handle").asText())).bearerAuth(token), JsonNode.class);
+JsonNode valor = http.retrieve(HttpRequest.POST("/sessions/" + id + "/static-field",
+        Map.of("className", "com.exemplo.di.ContextoGlobal", "path", List.of("registro", "com.exemplo.Tela::id", "valor"))).bearerAuth(token), JsonNode.class);</code></pre>
+<p><code>instances</code> e <code>referrers</code> varrem o heap em páginas curtas entre eventos da VM e juntam até <code>limit</code> (50) itens ou <code>maxPages</code> (100) páginas; com <code>"done": false</code>, mande o <code>next</code> em <code>after</code> para continuar. Classe inexistente: 404 <code>no-class</code>; objeto já coletado: 410.</p>
+<p>Na fila: <code>{"type": "instances", "className": "..."}</code>, <code>{"type": "staticField", "className": "...", "path": [...]}</code>, e também <code>classes</code>, <code>statics</code> e <code>referrers</code>. Num plugin: <code>lab.classes</code>, <code>lab.statics</code>, <code>lab.staticField</code>, <code>lab.instances</code>, <code>lab.referrers</code> e <code>lab.watch({static: 'classe'}, caminho, fn)</code>.</p>
 <p class="note">Os dois fluxos (recriar mantém o ViewModel e reabrir cria outro; tela pronta, espera e print, também como job) são testes do repositório (<code>CookbookClientTest</code>, <code>RunnerEndToEndTest</code>, <code>QueueEndToEndTest</code>), rodados com APKs de sonda sintéticos.</p>
 </article>
 </main>

@@ -163,6 +163,22 @@ class QueueApiTest implements TestPropertyProvider {
         Response readyWithSelector = submitJob("alice-token-1", "{\"steps\":[{\"type\":\"waitReady\",\"selector\":{\"text\":\"x\"}}]}");
         assertTrue(readyWithSelector.json().path("error").path("message").asText().contains("keys not used by this step: selector"), readyWithSelector.json()::toString);
         assertEquals(400, submitJob("alice-token-1", "{\"steps\":[{\"type\":\"back\",\"waitReady\":true}]}").status(), "waitReady is a screenshot field");
+        // state outside the screen
+        Map<String, String> stateSteps = Map.of(
+                "{\"type\":\"statics\"}", "(statics) needs className",
+                "{\"type\":\"instances\",\"limit\":5}", "(instances) needs className",
+                "{\"type\":\"staticField\",\"className\":\"a.B\",\"path\":{\"x\":1}}", "(staticField) needs path",
+                "{\"type\":\"staticField\",\"className\":\"a.B\"}", "(staticField) needs path",
+                "{\"type\":\"classes\",\"match\":\"\"}", "(classes) needs match",
+                "{\"type\":\"referrers\"}", "(referrers) needs a handle",
+                "{\"type\":\"instances\",\"className\":\"a.B\",\"handle\":\"h1\"}", "keys not used by this step: handle");
+        for (Map.Entry<String, String> entry : stateSteps.entrySet()) {
+            Response bad = submitJob("alice-token-1", "{\"steps\":[" + entry.getKey() + "]}");
+            assertEquals(400, bad.status(), entry.getKey());
+            assertTrue(bad.json().path("error").path("message").asText().contains(entry.getValue()), () -> entry.getKey() + " -> " + bad.json());
+        }
+        assertEquals(202, submitJob("alice-token-1", "{\"steps\":[{\"type\":\"staticField\",\"className\":\"a.B\",\"path\":[\"m\",\"k.with.dots\",0]},{\"type\":\"classes\",\"match\":\"B\",\"initialized\":true}]}").status(),
+                "a path array (a map key with dots) is accepted");
         assertEquals(400, submitJob("alice-token-1", "{\"priority\":12}").status());
         Response badConfig = submitJob("alice-token-1", "{\"config\":{\"endpointMocks\":[{\"url\":\"/x\",\"stauts\":200}]}}");
         assertEquals(400, badConfig.status());

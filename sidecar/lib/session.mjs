@@ -39,6 +39,9 @@ export function inventorySummary(inventory) {
   return JSON.parse(JSON.stringify(out, (key, value) => typeof value === 'bigint' ? String(value) : value));
 }
 
+/** HTTP status of a plugin query failure code of the runtime (runPluginQuery): 400 for a bad request, 404 no-class, 409 not-initialized, 410 collected, 503 busy, 422 otherwise. */
+export const pluginQueryStatus = code => ['bad-query', 'bad-handle', 'bad-path', 'bad-class', 'bad-args'].includes(code) ? 400 : code === 'no-class' ? 404 : code === 'not-initialized' ? 409 : code === 'collected' ? 410 : code === 'busy' ? 503 : 422;
+
 export class Session extends EventEmitter {
   constructor({ id = randomUUID(), owner = null, bundle, painter, limits, policy, appDataDir = null, deviceMemory = hostDeviceMemory(), log = () => {} }) {
     super(); this.setMaxListeners(100);
@@ -378,7 +381,18 @@ export class Session extends EventEmitter {
   async pluginQuery(query, args) {
     if (!this.client?.worker) throw conflict('vm-not-running', 'The VM is not running');
     try { return await this.client.pluginQuery(query, args); }
-    catch (error) { const code = error?.code ?? 'failed'; throw new HttpError(code === 'bad-query' || code === 'bad-handle' ? 400 : code === 'collected' ? 410 : code === 'busy' ? 503 : 422, code, String(error?.message ?? error)); }
+    catch (error) { const code = error?.code ?? 'failed'; throw new HttpError(pluginQueryStatus(code), code, String(error?.message ?? error)); }
+  }
+  /** A heap scan (instances, referrers) in the runtime's short pages, walked until `limit` items, the end of the heap or `maxPages`: { items, scanned, done, next, pages }. */
+  async pagedQuery(query, args, { limit, after, maxPages, budgetMs } = {}) {
+    const max = Math.max(1, Math.min(500, Number(limit) || 50)), pagesMax = Math.max(1, Math.min(500, Number(maxPages) || 100)), items = [];
+    let cursor = Number(after) || 0, scanned = 0, done = false, pages = 0;
+    for (; pages < pagesMax && items.length < max && !done; pages++) {
+      const page = (await this.pluginQuery(query, { ...args, limit: max - items.length, after: cursor, budgetMs })).value;
+      items.push(...(page?.items ?? [])); scanned += page?.scanned ?? 0;
+      if (page?.next === null || page?.next === undefined) done = true; else cursor = page.next;
+    }
+    return { items, scanned, done, next: done ? null : cursor, pages };
   }
   async screenState() { if (!this.client) return null; return this.client.screenState(); }
   async diagnostic() {

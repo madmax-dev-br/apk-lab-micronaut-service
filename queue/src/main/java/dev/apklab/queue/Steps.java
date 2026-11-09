@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.apklab.api.ApiException;
 import dev.apklab.api.QueueRequests.Step;
+import dev.apklab.api.Requests;
 import dev.apklab.api.Selector;
 import dev.apklab.queue.runners.RunnerError;
 import dev.apklab.queue.runners.RunnerGateway;
@@ -49,6 +50,11 @@ public final class Steps {
         FIELDS.put("inspect", List.of("handle", "options"));
         FIELDS.put("field", List.of("handle", "path", "options"));
         FIELDS.put("composeTree", List.of("maxNodes"));
+        FIELDS.put("classes", List.of("match", "limit", "initialized"));
+        FIELDS.put("statics", List.of("className", "options"));
+        FIELDS.put("staticField", List.of("className", "path", "options"));
+        FIELDS.put("instances", List.of("className", "subclasses", "limit", "after", "maxPages"));
+        FIELDS.put("referrers", List.of("handle", "limit", "after", "maxPages"));
         FIELDS.put("config", List.of("config"));
         FIELDS.put("logcat", List.of("level", "tag", "contains", "limit"));
         FIELDS.put("network", List.of("limit"));
@@ -93,8 +99,18 @@ public final class Steps {
                 }
                 case "tap" -> { if (!hasSelector && (step.x() == null || step.y() == null)) throw ApiException.badRequest(where + " (tap) needs a selector or x/y"); }
                 case "sleep" -> { if (step.ms() == null) throw ApiException.badRequest(where + " (sleep) needs ms between 0 and 60000"); }
-                case "viewModelField" -> { if (step.viewModel() == null || step.path() == null) throw ApiException.badRequest(where + " (viewModelField) needs viewModel (class name or suffix) and path"); }
-                case "inspect", "field" -> { if (step.handle() == null) throw ApiException.badRequest(where + " (" + step.type() + ") needs a handle"); }
+                case "viewModelField" -> { if (step.viewModel() == null || step.path() == null || !Requests.isPath(step.path())) throw ApiException.badRequest(where + " (viewModelField) needs viewModel (class name or suffix) and path"); }
+                case "inspect", "referrers" -> { if (step.handle() == null) throw ApiException.badRequest(where + " (" + step.type() + ") needs a handle"); }
+                case "field" -> {
+                    if (step.handle() == null) throw ApiException.badRequest(where + " (field) needs a handle");
+                    if (!Requests.isPath(step.path())) throw ApiException.badRequest(where + " (field) needs path (string or array)");
+                }
+                case "statics", "instances" -> { if (step.className() == null) throw ApiException.badRequest(where + " (" + step.type() + ") needs className"); }
+                case "staticField" -> {
+                    if (step.className() == null) throw ApiException.badRequest(where + " (staticField) needs className");
+                    if (step.path() == null || !Requests.isPath(step.path())) throw ApiException.badRequest(where + " (staticField) needs path (string or array)");
+                }
+                case "classes" -> { if (step.match() == null || step.match().isEmpty()) throw ApiException.badRequest(where + " (classes) needs match"); }
                 case "plugins" -> {
                     if (!pluginsAllowed) throw ApiException.forbidden("plugins-disabled", where + ": plugins are disabled on this queue (QUEUE_ALLOW_PLUGINS)");
                     if (step.plugins() == null || step.plugins().isEmpty()) throw ApiException.badRequest(where + " (plugins) needs a plugins list");
@@ -220,9 +236,11 @@ public final class Steps {
                     models.forEach(m -> found.add(m.path("className").asText()));
                     throw new ApiException(404, "view-model-not-found", "No ViewModel matching " + wanted + " on the screen (found: " + (found.length() == 0 ? "none" : found) + ")");
                 }
-                ObjectNode body = mapper.createObjectNode().put("handle", model.path("handle").asText()).put("path", step.path());
+                ObjectNode body = mapper.createObjectNode().put("handle", model.path("handle").asText());
+                body.set("path", mapper.valueToTree(step.path()));
                 body.set("options", step.options() == null ? mapper.createObjectNode() : mapper.valueToTree(step.options()));
-                ObjectNode out = mapper.createObjectNode().put("viewModel", model.path("className").asText()).put("handle", model.path("handle").asText()).put("path", step.path());
+                ObjectNode out = mapper.createObjectNode().put("viewModel", model.path("className").asText()).put("handle", model.path("handle").asText());
+                out.set("path", mapper.valueToTree(step.path()));
                 out.set("value", runner.call(sessionId, "POST", "/field", body, timeout));
                 return Outcome.of(out);
             }
@@ -232,10 +250,33 @@ public final class Steps {
                 return Outcome.of(runner.call(sessionId, "POST", "/inspect", body, timeout));
             }
             case "field": {
-                ObjectNode body = mapper.createObjectNode().put("handle", step.handle()).put("path", step.path() == null ? "" : step.path());
+                ObjectNode body = mapper.createObjectNode().put("handle", step.handle());
+                body.set("path", step.path() == null ? mapper.getNodeFactory().textNode("") : mapper.valueToTree(step.path()));
                 body.set("options", step.options() == null ? mapper.createObjectNode() : mapper.valueToTree(step.options()));
                 return Outcome.of(runner.call(sessionId, "POST", "/field", body, timeout));
             }
+            case "classes": {
+                StringJoiner q = new StringJoiner("&");
+                q.add("match=" + enc(step.match() == null ? "" : step.match()));
+                if (step.limit() != null) q.add("limit=" + step.limit());
+                if (Boolean.TRUE.equals(step.initialized())) q.add("initialized=1");
+                return Outcome.of(runner.call(sessionId, "GET", "/classes?" + q, null, timeout));
+            }
+            case "statics": {
+                ObjectNode body = mapper.createObjectNode().put("className", step.className());
+                body.set("options", step.options() == null ? mapper.createObjectNode() : mapper.valueToTree(step.options()));
+                return Outcome.of(runner.call(sessionId, "POST", "/statics", body, timeout));
+            }
+            case "staticField": {
+                ObjectNode body = mapper.createObjectNode().put("className", step.className());
+                body.set("path", step.path() == null ? mapper.getNodeFactory().textNode("") : mapper.valueToTree(step.path()));
+                body.set("options", step.options() == null ? mapper.createObjectNode() : mapper.valueToTree(step.options()));
+                return Outcome.of(runner.call(sessionId, "POST", "/static-field", body, timeout));
+            }
+            case "instances":
+                return Outcome.of(runner.call(sessionId, "POST", "/instances", pick(mapper, stepJson, "className", "subclasses", "limit", "after", "maxPages"), timeout));
+            case "referrers":
+                return Outcome.of(runner.call(sessionId, "POST", "/referrers", pick(mapper, stepJson, "handle", "limit", "after", "maxPages"), timeout));
             case "composeTree": {
                 JsonNode r = runner.call(sessionId, "GET", "/compose-tree?maxNodes=" + (step.maxNodes() == null ? 2000 : step.maxNodes()), null, timeout);
                 return new Outcome(mapper.createObjectNode().put("totalNodes", r.path("totalNodes").asInt(0)), List.of(json(mapper, label + ".compose-tree.json", r)));

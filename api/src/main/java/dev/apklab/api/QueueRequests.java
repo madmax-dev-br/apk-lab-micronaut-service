@@ -21,7 +21,7 @@ public final class QueueRequests {
 
     /** Step types of a job, in the order the queue runs them. */
     public static final List<String> STEP_TYPES = List.of("launch", "intent", "wait", "waitReady", "reload", "tap", "type", "scroll", "back", "sleep", "screenshot", "layoutBounds", "snapshot",
-            "elements", "viewModels", "viewModelField", "inspect", "field", "composeTree", "config", "logcat", "network", "plugins", "diagnostic", "screenState");
+            "elements", "viewModels", "viewModelField", "inspect", "field", "composeTree", "classes", "statics", "staticField", "instances", "referrers", "config", "logcat", "network", "plugins", "diagnostic", "screenState");
 
     /**
      * A job: an APK (multipart part "apk", apkBase64 or apkUrl), the session config and declarative steps. The queue runs it on a runner session and keeps the
@@ -48,7 +48,9 @@ public final class QueueRequests {
     /**
      * One declarative step. `type` picks the step; only the fields of that type may be set (others are rejected by the queue's validation).
      * Common fields: name (unique, names its artifacts), continueOnError, timeoutMs. "Tela pronta": wait takes ready (alone or with a selector), waitReady waits for it,
-     * screenshot takes waitReady; reload takes mode ("recreate", the default, or "reopen").
+     * screenshot takes waitReady; reload takes mode ("recreate", the default, or "reopen"). State outside the screen: classes (match, limit, initialized),
+     * statics (className), staticField (className, path), instances (className, subclasses, limit, after, maxPages) and referrers (handle, limit, after, maxPages).
+     * path is a dotted string or an array of parts (a part with dots, such as a map key).
      */
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -74,7 +76,7 @@ public final class QueueRequests {
             @Nullable Boolean systemBars,
             @Nullable Boolean names,
             @Nullable @Size(max = 500) String viewModel,
-            @Nullable @Size(max = 2000) String path,
+            @Nullable Object path,
             @Nullable Map<String, Object> options,
             @Nullable @Size(max = 200) String handle,
             @Nullable @Min(1) @Max(4000) Integer maxNodes,
@@ -87,7 +89,13 @@ public final class QueueRequests {
             @Nullable @Min(0) @Max(300) Integer seconds,
             @Nullable @Pattern(regexp = "recreate|reopen", message = "mode must be \"recreate\" or \"reopen\"") String mode,
             @Nullable Boolean ready,
-            @Nullable Boolean waitReady) {
+            @Nullable Boolean waitReady,
+            @Nullable @Size(max = 200) String match,
+            @Nullable Boolean initialized,
+            @Nullable @Size(max = 500) String className,
+            @Nullable Boolean subclasses,
+            @Nullable @Min(0) Long after,
+            @Nullable @Min(1) @Max(500) Integer maxPages) {
 
         /** A step with only a type (and optionally a name), for code that builds jobs. */
         public static Step of(String type) { return new Builder(type).build(); }
@@ -96,9 +104,10 @@ public final class QueueRequests {
         /** Fluent construction of a step from Java (the record has many optional fields). */
         public static final class Builder {
             private final String type; private String name; private Boolean continueOnError; private Integer timeoutMs; private String activity; private Requests.Intent intent;
-            private Selector selector; private Double x, y, dx, dy, scale; private Boolean longPress, append, gone, systemBars, names; private String text, key, viewModel, path, handle, level, tag, contains;
+            private Selector selector; private Double x, y, dx, dy, scale; private Boolean longPress, append, gone, systemBars, names; private String text, key, viewModel, handle, level, tag, contains;
             private Integer ms, maxNodes, limit, seconds; private Map<String, Object> options; private SessionConfig config; private List<PluginSpec> plugins;
-            private String mode; private Boolean ready, waitReady;
+            private String mode; private Boolean ready, waitReady; private Object path;
+            private String match, className; private Boolean initialized, subclasses; private Long after; private Integer maxPages;
             Builder(String type) { this.type = type; }
             public Builder name(String v) { name = v; return this; }
             public Builder continueOnError(boolean v) { continueOnError = v; return this; }
@@ -118,6 +127,8 @@ public final class QueueRequests {
             public Builder names(boolean v) { names = v; return this; }
             public Builder viewModel(String v) { viewModel = v; return this; }
             public Builder path(String v) { path = v; return this; }
+            /** A path as parts, for a part with dots (a map key). */
+            public Builder path(List<String> v) { path = List.copyOf(v); return this; }
             public Builder options(Map<String, Object> v) { options = v; return this; }
             public Builder handle(String v) { handle = v; return this; }
             public Builder maxNodes(int v) { maxNodes = v; return this; }
@@ -135,9 +146,22 @@ public final class QueueRequests {
             public Builder ready(boolean v) { ready = v; return this; }
             /** screenshot: wait for "Tela pronta" before painting. */
             public Builder waitReady(boolean v) { waitReady = v; return this; }
+            /** classes: part of the class name or a /regex/. */
+            public Builder match(String v) { match = v; return this; }
+            /** classes: only classes the app already initialized. */
+            public Builder initialized(boolean v) { initialized = v; return this; }
+            /** statics, staticField, instances: the class. */
+            public Builder className(String v) { className = v; return this; }
+            /** instances: also objects of subclasses (the default). */
+            public Builder subclasses(boolean v) { subclasses = v; return this; }
+            /** instances, referrers: continue a scan from its cursor (next). */
+            public Builder after(long v) { after = v; return this; }
+            /** instances, referrers: at most this many of the runtime's pages (100, max 500). */
+            public Builder maxPages(int v) { maxPages = v; return this; }
             public Step build() {
                 return new Step(type, name, continueOnError, timeoutMs, activity, intent, selector, x, y, longPress, text, append, dx, dy, gone, ms, scale, key, systemBars, names,
-                        viewModel, path, options, handle, maxNodes, config, level, tag, contains, limit, plugins, seconds, mode, ready, waitReady);
+                        viewModel, path, options, handle, maxNodes, config, level, tag, contains, limit, plugins, seconds, mode, ready, waitReady,
+                        match, initialized, className, subclasses, after, maxPages);
             }
         }
     }

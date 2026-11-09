@@ -160,6 +160,34 @@ class QueueEndToEndTest implements TestPropertyProvider {
     }
 
     @Test
+    void aQueuedJobReadsStateOutsideTheScreen() throws Exception {
+        String job = """
+                {"steps": [
+                   {"type": "launch"},
+                   {"type": "waitReady", "timeoutMs": 20000},
+                   {"type": "classes", "match": "runtime.Recomposer", "initialized": true},
+                   {"type": "statics", "className": "androidx.compose.runtime.Recomposer"},
+                   {"type": "staticField", "className": "androidx.compose.runtime.Recomposer", "path": ["_runningRecomposers", "value"]},
+                   {"type": "instances", "className": "androidx.compose.runtime.Recomposer"},
+                   {"type": "instances", "className": "java.lang.Object", "limit": 3, "maxPages": 2}
+                 ]}""";
+        HttpResponse<byte[]> submitted = send("POST", "/jobs", "application/vnd.android.package-archive", apk("compose-approvals-debug.apk"), Map.of("X-Job", JSON.readTree(job).toString()));
+        assertEquals(202, submitted.statusCode(), new String(submitted.body()));
+        String id = json(submitted).path("id").asText();
+        send("GET", "/jobs/" + id + "/events", null, null, Map.of());   // the SSE stream ends with the job
+        JsonNode result = json(send("GET", "/jobs/" + id, null, null, Map.of()));
+        assertEquals("succeeded", result.path("state").asText(), result.toPrettyString());
+        JsonNode steps = result.path("result").path("steps");
+        assertTrue(steps.get(2).path("output").path("items").toString().contains("\"androidx.compose.runtime.Recomposer\""), steps.get(2).toString());
+        assertEquals("StateFlow", steps.get(3).path("output").path("fields").path("_runningRecomposers").path("$kind").asText(), steps.get(3).toString());
+        assertTrue(steps.get(4).path("output").has("$handle"), steps.get(4).toString());
+        assertEquals(1, steps.get(5).path("output").path("items").size(), steps.get(5).toString());
+        assertTrue(steps.get(5).path("output").path("done").asBoolean());
+        assertEquals(3, steps.get(6).path("output").path("items").size(), steps.get(6).toString());
+        assertTrue(steps.get(6).path("output").path("next").asLong() > 0, steps.get(6).toString());
+    }
+
+    @Test
     void anInteractiveLeaseProxiesTheSession() throws Exception {
         HttpResponse<byte[]> created = send("POST", "/leases", "application/vnd.android.package-archive", apk("net-probe.apk"),
                 Map.of("X-Job", "{\"durationSeconds\":120,\"config\":{\"launch\":true,\"endpointMocks\":[{\"url\":\"/net-probe/hello.json\",\"body\":\"via lease\"}]}}"));

@@ -33,6 +33,7 @@
   <a href="#tela">Tela e screenshots</a>
   <a href="#tela-pronta">Tela pronta</a>
   <a href="#inspecao">Inspeção da VM</a>
+  <a href="#estado-fora">Estado fora da tela</a>
   <a href="#logs">Logcat, rede e eventos</a>
   <a href="#permissoes">Permissões e dados</a>
   <a href="#plugins">Plugins</a>
@@ -54,22 +55,23 @@
 </ul>
 <table>
 <tr><th>Status</th><th>code</th><th>Quando</th></tr>
-<tr><td>400</td><td><code>bad-request</code></td><td>Corpo, config, seletor ou passo inválido.</td></tr>
+<tr><td>400</td><td><code>bad-request</code>, <code>bad-handle</code>, <code>bad-path</code>, <code>bad-class</code>, <code>bad-args</code></td><td>Corpo, config, seletor, passo ou consulta da VM inválido.</td></tr>
 <tr><td>401</td><td><code>unauthorized</code></td><td>Token ausente ou errado.</td></tr>
 <tr><td>403</td><td><code>plugins-disabled</code>, <code>network-policy</code>, <code>memory-policy</code>, <code>apk-url-not-allowed</code>, <code>cors-origin-not-allowed</code></td><td>Política do operador.</td></tr>
-<tr><td>404</td><td><code>not-found</code>, <code>element-not-found</code>, <code>nothing-here</code>, <code>view-model-not-found</code></td><td>Sessão, elemento ou recurso inexistente.</td></tr>
+<tr><td>404</td><td><code>not-found</code>, <code>element-not-found</code>, <code>nothing-here</code>, <code>view-model-not-found</code>, <code>no-class</code></td><td>Sessão, elemento ou recurso inexistente.</td></tr>
 <tr><td>408</td><td><code>wait-timeout</code></td><td><code>/wait</code> esgotou o tempo.</td></tr>
-<tr><td>409</td><td><code>vm-not-running</code>, <code>session-closed</code>, <code>no-screen</code>, <code>not-active</code></td><td>Estado não permite a operação.</td></tr>
+<tr><td>409</td><td><code>vm-not-running</code>, <code>session-closed</code>, <code>no-screen</code>, <code>not-active</code>, <code>not-initialized</code></td><td>Estado não permite a operação.</td></tr>
+<tr><td>410</td><td><code>collected</code></td><td>O objeto do handle já foi coletado.</td></tr>
 <tr><td>413</td><td><code>too-large</code></td><td>APK ou corpo grande demais.</td></tr>
 <tr><td>422</td><td><code>vm-error</code>, <code>not-editable</code>, <code>not-scrollable</code></td><td>A VM falhou na operação (inclui exceção do app e API não implementada).</td></tr>
 <tr><td>429</td><td><code>too-many-operations</code>, <code>queue-full</code></td><td>Fila de operações da sessão ou da fila cheia (<code>Retry-After</code>).</td></tr>
-<tr><td>503</td><td><code>at-capacity</code>, <code>sidecar-crashed</code>, <code>sidecar-start-failed</code></td><td>Runner cheio (<code>Retry-After: 5</code>) ou processo da sessão caiu.</td></tr>
+<tr><td>503</td><td><code>at-capacity</code>, <code>sidecar-crashed</code>, <code>sidecar-start-failed</code>, <code>busy</code></td><td>Runner cheio (<code>Retry-After: 5</code>), processo da sessão caiu ou a VM está ocupada para uma consulta.</td></tr>
 <tr><td>504</td><td><code>sidecar-timeout</code></td><td>O sidecar não respondeu e foi encerrado.</td></tr>
 </table>
 
 <h2 id="servico">Runner: serviço</h2>
 <p class="endpoint"><span class="method">GET</span> /health <small>(público)</small></p>
-<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "79526b6931c6",
+<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "308c7a12ce00",
  "pluginsAllowed": false, "maxSessions": 2, "activeSessions": 1, "reserved": 0, "available": 1, "freeMemoryMb": 14980,
  "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8.0, "workerHeapMb": 3072},
  "network": {"allowedHosts": ["*"], "allowPrivateNetwork": false}, "appData": true}</code></pre>
@@ -95,7 +97,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/vnd.android.pac
 curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      -d "{\"apkBase64\": \"$(base64 &lt; app.apk | tr -d '\n')\", \"config\": {\"launch\": true}}" $R/sessions</code></pre>
 <pre><code>{"session": {"id": "5efd76bf-...", "state": "running", "packageName": "com.exemplo.app", "launcherActivity": "com.exemplo.app.MainActivity",
-             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "79526b6931c6",
+             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "308c7a12ce00",
              "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8, "workerHeapMb": 3072, "liveObjects": 40276, "vmLimit": 671088}, ...},
  "inventory": {"packageName": "...", "usesSdk": {"minSdkVersion": 24, "targetSdkVersion": 34}, "activities": [...], "usesPermissions": [...], ...},
  "config": { ...a config normalizada... },
@@ -211,9 +213,27 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/view-models</code></td><td><code>[{"className", "handle", "owner", "library"}]</code> da tela ativa.</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/fragments</code></td><td>Fragments da Activity.</td></tr>
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/inspect</code></td><td><code>{"handle", "options"?}</code>: campos de um objeto.</td></tr>
-<tr><td><span class="method">POST</span> <code>/sessions/{id}/field</code></td><td><code>{"handle", "path": "estado.value", "options"?}</code>: um campo (MutableState, StateFlow, LiveData, listas e mapas são resumidos).</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/field</code></td><td><code>{"handle", "path": "estado.value", "options"?}</code>: um campo (MutableState, StateFlow, LiveData, listas e mapas são resumidos). <code>path</code> pode ser um array quando uma parte tem pontos (uma chave de mapa).</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/methods?query=</code></td><td>Busca de métodos do app (para montar overrides).</td></tr>
 </table>
+
+<h3 id="estado-fora">Estado fora da tela</h3>
+<p>Estado guardado num campo estático: um <code>object</code> Kotlin, um companion, um singleton, o contêiner de injeção de dependências com seus escopos. São as mesmas consultas dos plugins do site (<code>lab.classes</code>, <code>lab.statics</code>, <code>lab.staticField</code>, <code>lab.instances</code>, <code>lab.referrers</code>), todas somente leitura: nenhuma chama métodos do app, e uma classe que o app ainda não inicializou nunca tem o <code>&lt;clinit&gt;</code> rodado por uma consulta. WeakReference (<code>ref.get</code>), <code>by lazy</code> e ThreadLocal são atravessados.</p>
+<table>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/classes?match=&amp;limit=100&amp;initialized=1</code></td><td>Classes do APK pelo nome (parte do nome ou <code>/regex/</code>; <code>match</code> obrigatório, 400 sem ele); <code>limit</code> até 1000; <code>initialized=1</code> só as já inicializadas.</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/statics</code></td><td><code>{"className", "options"?}</code>: os campos estáticos. Uma classe não inicializada responde <code>status: "not-initialized"</code>; inexistente, 404 <code>no-class</code>.</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/static-field</code></td><td><code>{"className", "path", "options"?}</code>: um valor pelo caminho a partir de um campo estático; <code>path</code> é texto ou array. 409 <code>not-initialized</code> numa classe ainda não inicializada.</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/instances</code></td><td><code>{"className", "subclasses"?, "limit"?, "after"?, "maxPages"?}</code>: objetos vivos de um tipo (subclasses incluídas, a menos que <code>"subclasses": false</code>).</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/referrers</code></td><td><code>{"handle", "limit"?, "after"?, "maxPages"?}</code>: campos estáticos e objetos que seguram um objeto, com o campo <code>via</code>.</td></tr>
+</table>
+<p>O heap é varrido em páginas curtas entre eventos da VM; a resposta junta páginas até <code>limit</code> (50, no máximo 500) ou <code>maxPages</code> (100, no máximo 500), e <code>next</code> continua uma varredura incompleta (mande-o em <code>after</code>).</p>
+<pre><code>GET  /sessions/{id}/classes?match=Contexto          → {"items": [{"className": "com.exemplo.di.ContextoGlobal", "status": "initialized", "staticFields": 2}], "matched": 1}
+POST /sessions/{id}/statics       {"className": "com.exemplo.di.ContextoGlobal", "options": {"depth": 2}}
+POST /sessions/{id}/static-field  {"className": "com.exemplo.di.ContextoGlobal", "path": ["registro", "com.exemplo.Tela::id", "valor"]}
+POST /sessions/{id}/instances     {"className": "com.exemplo.tela.Armazenamento", "limit": 5}
+→ {"items": [{"handle": "h9120.j0l26s", "className": "com.exemplo.tela.Armazenamento"}], "scanned": 35072, "done": true, "next": null, "pages": 1}
+POST /sessions/{id}/referrers     {"handle": "h9120.j0l26s"}
+→ {"items": [{"kind": "object", "handle": "h8800.j0l26s", "className": "com.exemplo.di.FabricaDeEscopo", "via": "valores"}], "scanned": 35072, "done": true, "next": null, "pages": 1}</code></pre>
 
 <h2 id="logs">Logcat, rede e eventos</h2>
 <table>
@@ -290,7 +310,12 @@ curl -H "Authorization: Bearer $C" -F apk=@app.apk -F 'job={"priority": 7, "step
 <tr><td><code>snapshot</code>, <code>composeTree</code> (<code>maxNodes</code>), <code>diagnostic</code></td><td></td><td>JSON como artefato</td></tr>
 <tr><td><code>elements</code>, <code>screenState</code>, <code>viewModels</code></td><td><code>selector</code></td><td>na saída</td></tr>
 <tr><td><code>viewModelField</code></td><td><code>viewModel</code> (classe ou sufixo), <code>path</code>, <code>options</code></td><td>viewModel, handle, value</td></tr>
-<tr><td><code>inspect</code>, <code>field</code></td><td><code>handle</code>, <code>path</code>, <code>options</code></td><td>na saída</td></tr>
+<tr><td><code>inspect</code>, <code>field</code></td><td><code>handle</code>, <code>path</code> (texto ou array), <code>options</code></td><td>na saída</td></tr>
+<tr><td><code>classes</code></td><td><code>match</code>, <code>limit</code>, <code>initialized</code></td><td>classes pelo nome</td></tr>
+<tr><td><code>statics</code></td><td><code>className</code>, <code>options</code></td><td>campos estáticos</td></tr>
+<tr><td><code>staticField</code></td><td><code>className</code>, <code>path</code> (texto ou array), <code>options</code></td><td>valor</td></tr>
+<tr><td><code>instances</code></td><td><code>className</code>, <code>subclasses</code>, <code>limit</code>, <code>after</code>, <code>maxPages</code></td><td>handles (<code>items</code>, <code>done</code>, <code>next</code>)</td></tr>
+<tr><td><code>referrers</code></td><td><code>handle</code>, <code>limit</code>, <code>after</code>, <code>maxPages</code></td><td>quem segura (<code>items</code> com <code>via</code>)</td></tr>
 <tr><td><code>config</code></td><td><code>config</code> (PATCH ao vivo)</td><td>applied, restartRequired</td></tr>
 <tr><td><code>logcat</code>, <code>network</code></td><td><code>level</code>, <code>tag</code>, <code>contains</code>, <code>limit</code></td><td>JSON como artefato</td></tr>
 <tr><td><code>plugins</code></td><td><code>plugins</code>, <code>seconds</code> (exige <code>QUEUE_ALLOW_PLUGINS</code> e um runner com plugins)</td><td>saída dos plugins, imagens como artefatos</td></tr>
