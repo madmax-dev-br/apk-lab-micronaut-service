@@ -19,7 +19,9 @@ class SidecarScriptsTest {
     void sidecarUnitTestsPass() throws IOException, InterruptedException {
         assumeTrue(TestHttp.nodeAvailable(), "Node.js is needed for the sidecar's tests");
         Path root = Path.of(System.getProperty("apklab.repoRoot", "..")).toAbsolutePath();
-        ProcessBuilder builder = new ProcessBuilder(System.getenv().getOrDefault("APK_LAB_NODE", "node"), "--test", "sidecar/test/").directory(root.toFile()).redirectErrorStream(true);
+        java.util.List<String> command = new java.util.ArrayList<>(java.util.List.of(System.getenv().getOrDefault("APK_LAB_NODE", "node"), "--test"));
+        try (var files = java.nio.file.Files.list(root.resolve("sidecar/test"))) { files.map(file -> "sidecar/test/" + file.getFileName()).filter(name -> name.endsWith(".test.mjs")).sorted().forEach(command::add); }   // explicit files: `node --test <dir>` is not accepted by every Node version
+        ProcessBuilder builder = new ProcessBuilder(command).directory(root.toFile()).redirectErrorStream(true);
         Process process = builder.start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         assertEquals(true, process.waitFor(120, TimeUnit.SECONDS), "node --test finished");
