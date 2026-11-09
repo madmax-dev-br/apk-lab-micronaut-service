@@ -28,6 +28,7 @@
   <a href="#por-que-sidecar">Por que um sidecar Node</a>
   <a href="#protocolo">Protocolo do sidecar</a>
   <a href="#inicio-rapido">Início rápido</a>
+  <a href="#codespaces">GitHub Codespaces</a>
   <a href="#docker">Docker Compose</a>
   <a href="#autenticacao">Autenticação</a>
   <a href="#configuracao">Configuração</a>
@@ -123,6 +124,19 @@ export QUEUE_CLIENTS="eu:$(openssl rand -hex 16)" QUEUE_RUNNERS="http://127.0.0.
 #  "memory":{"budgetMiB":1024,"maxHeapObjects":671088,"source":"navigator.deviceMemory=8","deviceMemory":8.0,"workerHeapMb":3072},
 #  "network":{"allowedHosts":["*"],"allowPrivateNetwork":false},"appData":true,...}</code></pre>
 <p>O runtime vem do repositório público do site, <strong>no commit fixado</strong> em <code>sidecar/runtime.lock.json</code> (revisão do <code>build-info.json</code>, lista de arquivos, tamanho e SHA-256). Uma publicação nova do site não muda o que este repositório roda. Para usar outra cópia do runtime (por exemplo, um <code>dist/</code> que você construiu), aponte <code>APK_LAB_RUNTIME_DIR</code> para ela. <code>node sidecar/fetch-runtime.mjs --check</code> confere uma cópia existente; <code>--base &lt;url&gt;</code> baixa de um espelho (os hashes continuam valendo).</p>
+
+<h2 id="codespaces">GitHub Codespaces</h2>
+<p><a href="https://codespaces.new/madmax-dev-br/apk-lab-micronaut-service?quickstart=1"><img src="https://github.com/codespaces/badge.svg" alt="Abrir no GitHub Codespaces"></a></p>
+<p>Para testar sem instalar nada: o codespace vem com Java 21 e Node 22, baixa o runtime fixado (SHA-256 conferido) e compila o runner quando é criado (<code>.devcontainer/</code>). No terminal dele:</p>
+<pre><code>bash .devcontainer/runner.sh               # runner na porta 8081; token em ~/.apk-lab-runner-token (ou o secret RUNNER_TOKEN)
+bash .devcontainer/demo.sh app.apk         # sessão + "Tela pronta" + print em tela.png (arraste o APK para o explorador antes)
+RUNNER_ALLOW_PLUGINS=true bash .devcontainer/runner.sh   # com plugins no servidor</code></pre>
+<ul>
+  <li><strong>Endereço:</strong> a porta 8081 é encaminhada como <code>https://&lt;codespace&gt;-8081.app.github.dev</code>, <strong>privada</strong> por padrão (só abre com a sua conta do GitHub). Da sua máquina: <code>gh codespace ports forward 8081:8081</code> e use <code>http://127.0.0.1:8081</code>; ou torne a porta pública na aba Portas (o Bearer token continua obrigatório).</li>
+  <li><strong>Máquina:</strong> 4 núcleos / 16 GB (uma sessão usa até 3 GB de heap do Worker mais a JVM).</li>
+  <li><strong>Dados:</strong> o codespace é seu; APKs e prints ficam nele (<code>*.apk</code> é ignorado pelo git) e somem quando você o apaga.</li>
+  <li><strong>CI:</strong> o workflow <code>Devcontainer (Codespaces)</code> monta o mesmo contêiner, roda o setup e confere que o runner sobe com o runtime do lock.</li>
+</ul>
 
 <h2 id="docker">Docker Compose</h2>
 <pre><code>export RUNNER_TOKEN=$(openssl rand -hex 24) QUEUE_CLIENT_TOKEN=$(openssl rand -hex 24)

@@ -11,6 +11,19 @@ A VM do lab é JavaScript + WebAssembly e não roda dentro da JVM: cada sessão 
 
 A API (caminhos, corpos JSON, erros, eventos SSE, passos de job) é a mesma do [apk-lab-node-service](https://github.com/madmax-dev-br/apk-lab-node-service).
 
+## Testar no GitHub Codespaces
+
+[![Abrir no GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/madmax-dev-br/apk-lab-micronaut-service?quickstart=1)
+
+O codespace já vem com Java 21 e Node 22, baixa o runtime fixado (SHA-256 conferido) e compila o runner ao ser criado (`.devcontainer/`). Depois, no terminal:
+
+```sh
+bash .devcontainer/runner.sh               # runner na porta 8081; token em ~/.apk-lab-runner-token (ou o secret RUNNER_TOKEN)
+bash .devcontainer/demo.sh app.apk         # sessão + "Tela pronta" + print em tela.png (arraste o APK para o explorador antes)
+```
+
+A porta 8081 é encaminhada como `https://<codespace>-8081.app.github.dev`, **privada** por padrão: abre só com a sua conta do GitHub. Para chamar da sua máquina, use `gh codespace ports forward 8081:8081` (vira `http://127.0.0.1:8081`) ou torne a porta pública (o Bearer token continua obrigatório). Máquina recomendada: 4 núcleos / 16 GB. O codespace é seu: o APK e os prints ficam nele (`*.apk` é ignorado pelo git) e somem quando você o apaga. O workflow `Devcontainer (Codespaces)` monta o mesmo contêiner no CI e confere que o runner sobe.
+
 ## Início rápido
 
 Requisitos: JDK 21 e Node.js 22+.
