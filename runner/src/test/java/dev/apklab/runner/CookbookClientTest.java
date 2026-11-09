@@ -41,7 +41,7 @@ class CookbookClientTest implements TestPropertyProvider {
     @Override
     public Map<String, String> getProperties() {
         return Map.of("runner.runtime-dir", System.getenv("APK_LAB_RUNTIME_DIR"), "runner.sidecar-script", "../sidecar/vm-host.mjs", "runner.token", "cookbook-token",
-                "runner.max-line-mb", "64", "runner.operation-timeout-seconds", "45", "runner.call-margin-seconds", "15");   // the "test" environment shrinks these for the fake sidecar
+                "runner.max-line-mb", "64", "runner.operation-timeout-seconds", "45", "runner.call-margin-seconds", "15", "runner.app-data-dir", "off");   // the "test" environment shrinks these for the fake sidecar
     }
 
     @AfterEach

@@ -16,6 +16,8 @@ const ops = {
   init: args => { session = args; return { sessionId: args.sessionId, policy: args.policy, limits: args.limits }; },
   load: args => { loads++; config = args.config ?? {}; if (config.device?.screen === 'invalid-preset') fail(400, 'bad-request', 'config.device.screen: unsupported value "invalid-preset"'); return { session: describe(), inventory: { packageName: 'test.fake' }, config, snapshot: null, apkPath: args.apkPath }; },
   describe: () => describe(),
+  defaults: args => ({ config: { missingApis: 'primitives', network: { allowedHosts: args.policy?.allowedHosts ?? [] }, raster: 'full' }, policy: args.policy, limits: args.limits }),
+  initArgs: () => session,
   getConfig: () => config,
   updateConfig: args => { config = { ...config, ...args.config }; return { applied: Object.keys(args.config ?? {}).map(key => ({ key })), restartRequired: [], running: true, config }; },
   restart: args => { loads++; if (args.config) config = { ...config, ...args.config }; return { session: describe() }; },

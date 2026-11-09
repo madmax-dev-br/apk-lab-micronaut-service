@@ -151,6 +151,37 @@ class RunnerApiTest {
     }
 
     @Test
+    void defaultsMatchTheSiteAndTheRasterSettingsAreValidated() {
+        JsonNode health = new TestHttp(server.getURL().toString(), null).get("/health").json();
+        assertTrue(health.path("memory").path("maxHeapObjects").asInt() >= 65536, health::toString);
+        assertTrue(health.path("memory").path("budgetMiB").asInt() > 0, health::toString);
+        assertEquals("[\"*\"]", health.path("network").path("allowedHosts").toString());
+        assertFalse(health.path("network").path("allowPrivateNetwork").asBoolean());
+        assertTrue(health.path("appData").asBoolean(), "app data is kept by default");
+
+        String id = create("{\"raster\":\"progressive\",\"rasterScale\":0.25,\"rasterNavigation\":false}");
+        JsonNode init = http.get("/sessions/" + id).json();
+        assertNotNull(init);
+        JsonNode policy = sessions.get(id).call("initArgs", TestHttp.JSON.createObjectNode()).path("policy");
+        assertEquals("[\"*\"]", policy.path("allowedHosts").toString(), policy::toString);
+        assertFalse(policy.path("allowPrivateNetwork").asBoolean(), policy::toString);
+        assertTrue(sessions.get(id).call("initArgs", TestHttp.JSON.createObjectNode()).path("appDataDir").asText().contains("app-data"), "the sidecar gets the app data folder");
+        JsonNode config = http.get("/sessions/" + id + "/config").json();
+        assertEquals(0.25, config.path("rasterScale").asDouble());
+        assertFalse(config.path("rasterNavigation").asBoolean());
+        TestHttp.Response live = http.patch("/sessions/" + id + "/config", Map.of("rasterScale", 0.75));
+        assertEquals(200, live.status(), () -> String.valueOf(live.json()));
+        for (String bad : List.of("{\"rasterScale\":0.3}", "{\"rasterScale\":0}", "{\"rasterNavigation\":\"yes\"}")) {
+            TestHttp.Response response = http.postBytes("/sessions", TestHttp.fakeApk(), "application/octet-stream", Map.of("X-APK-Config", bad));
+            assertEquals(400, response.status(), bad);
+        }
+        assertEquals(400, http.patch("/sessions/" + id + "/config", Map.of("rasterScale", 0.6)).status());
+        JsonNode defaults = http.get("/defaults").json();
+        assertEquals("primitives", defaults.path("config").path("missingApis").asText(), defaults::toString);
+        assertFalse(defaults.path("policy").path("allowPrivateNetwork").asBoolean());
+    }
+
+    @Test
     void theSidecarsOwnValidationFailsTheCreation() {
         TestHttp.Response response = http.postBytes("/sessions", TestHttp.fakeApk(), "application/octet-stream", Map.of("X-APK-Config", "{\"device\":{\"screen\":\"invalid-preset\"}}"));
         assertEquals(400, response.status());

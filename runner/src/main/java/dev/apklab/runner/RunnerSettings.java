@@ -27,18 +27,22 @@ public class RunnerSettings {
     private int startTimeoutSeconds = 30;
     private int callMarginSeconds = 15;
     private int maxLineMb = 64;
-    private String allowedHosts = "";
+    private String allowedHosts = "*";
+    private String allowPrivateNetwork = "false";
     private boolean allowPlugins = false;
     private int pluginMax = 4;
     private int pluginHeapMb = 64;
     private int pluginBusySeconds = 5;
     private int pluginMaxRunSeconds = 0;
     private int pluginMaxCodeKb = 256;
-    private String appDataDir = "";
+    private String appDataDir = DEFAULT_APP_DATA_DIR;
     private String runtimeDir = "";
     private String node = "node";
     private String sidecarScript = "sidecar/vm-host.mjs";
     private String workDir = "";
+
+    /** RUNNER_APP_DATA_DIR default: a data/app-data folder next to the service (created on demand, gitignored). "off" disables persistence. */
+    public static final String DEFAULT_APP_DATA_DIR = "data/app-data";
 
     public static List<String> splitList(String text) {
         if (text == null || text.isBlank()) return List.of();
@@ -47,7 +51,23 @@ public class RunnerSettings {
 
     public boolean authDisabled() { return "off".equalsIgnoreCase(auth); }
     public List<String> corsOriginList() { return splitList(corsOrigins).stream().map(o -> o.replaceAll("/+$", "")).toList(); }
-    public List<String> allowedHostList() { return splitList(allowedHosts).stream().map(String::toLowerCase).toList(); }
+    /** RUNNER_ALLOWED_HOSTS: the operator's cap on the hosts a session may allow. Default "*" (every public host, like the site); "none" = endpoint mocks only. */
+    public List<String> allowedHostList() {
+        if (allowedHosts.isBlank()) return List.of("*");
+        if (allowedHosts.trim().equalsIgnoreCase("none")) return List.of();
+        return splitList(allowedHosts).stream().map(String::toLowerCase).toList();
+    }
+    /** RUNNER_ALLOW_PRIVATE_NETWORK: 1/true lets apps reach loopback, private (RFC 1918, fc00::/7) and link-local addresses; refused by default. */
+    public boolean allowPrivateNetworkEnabled() { return allowPrivateNetwork != null && allowPrivateNetwork.trim().matches("(?i)1|true|yes|on"); }
+    /** Where app data persists: RUNNER_APP_DATA_DIR (relative paths against the repository / install root), null when "off". */
+    public Path appDataPath() {
+        String value = appDataDir == null || appDataDir.isBlank() ? DEFAULT_APP_DATA_DIR : appDataDir.trim();
+        if (value.matches("(?i)off|none|false|0")) return null;
+        Path path = Path.of(value);
+        if (path.isAbsolute()) return path;
+        String root = System.getProperty("apklab.repoRoot");
+        return (root != null ? Path.of(root).resolve(path) : path.toAbsolutePath()).normalize();
+    }
     public long maxApkBytes() { return (long) maxApkMb * 1024 * 1024; }
     public long maxLineBytes() { return (long) maxLineMb * 1024 * 1024; }
     public Path workPath() {
@@ -88,6 +108,8 @@ public class RunnerSettings {
     public void setMaxLineMb(int maxLineMb) { this.maxLineMb = Math.max(1, maxLineMb); }
     public String getAllowedHosts() { return allowedHosts; }
     public void setAllowedHosts(String allowedHosts) { this.allowedHosts = allowedHosts == null ? "" : allowedHosts; }
+    public String getAllowPrivateNetwork() { return allowPrivateNetwork; }
+    public void setAllowPrivateNetwork(String allowPrivateNetwork) { this.allowPrivateNetwork = allowPrivateNetwork == null ? "false" : allowPrivateNetwork; }
     public boolean isAllowPlugins() { return allowPlugins; }
     public void setAllowPlugins(boolean allowPlugins) { this.allowPlugins = allowPlugins; }
     public int getPluginMax() { return pluginMax; }

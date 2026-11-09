@@ -24,13 +24,14 @@ WORKDIR /app
 COPY --from=build /src/runner/build/install/runner /app/runner
 COPY --from=runtime /app/sidecar /app/sidecar
 COPY --from=runtime /app/vendor /app/vendor
-RUN mkdir -p /app/work && chown -R apklab /app/work
+RUN mkdir -p /app/work /app/data/app-data && chown -R apklab /app/work /app/data
 USER apklab
 ENV RUNNER_HOST=0.0.0.0 \
     RUNNER_PORT=8081 \
     RUNNER_SIDECAR_SCRIPT=/app/sidecar/vm-host.mjs \
     APK_LAB_RUNTIME_DIR=/app/vendor/apk-lab \
     RUNNER_WORK_DIR=/app/work \
+    RUNNER_APP_DATA_DIR=/app/data/app-data \
     JAVA_OPTS="-XX:MaxRAMPercentage=25"
 EXPOSE 8081
 HEALTHCHECK --interval=15s --timeout=5s CMD ["node", "-e", "fetch('http://127.0.0.1:8081/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

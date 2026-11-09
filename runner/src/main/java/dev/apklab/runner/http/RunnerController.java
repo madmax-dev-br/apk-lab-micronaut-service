@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.apklab.runner.RunnerApplication;
 import dev.apklab.runner.RunnerSettings;
+import dev.apklab.runner.session.MemoryBudget;
 import dev.apklab.runner.session.RunnerSession;
 import dev.apklab.runner.session.SessionManager;
 import dev.apklab.runner.sidecar.SidecarLauncher;
@@ -29,6 +30,7 @@ public class RunnerController {
     private final SidecarLauncher launcher;
     private final ObjectMapper mapper;
     private volatile JsonNode templates;
+    private volatile JsonNode defaults;
 
     public RunnerController(SessionManager sessions, RunnerSettings settings, SidecarLauncher launcher, ObjectMapper mapper) {
         this.sessions = sessions;
@@ -43,7 +45,7 @@ public class RunnerController {
                 .put("docs", "https://madmax-dev-br.github.io/apk-lab-micronaut-service/");
     }
 
-    /** Public: { ok, service, version, runtimeRevision, pluginsAllowed, maxSessions, activeSessions, reserved, available, freeMemoryMb }. */
+    /** Public: { ok, service, version, runtimeRevision, pluginsAllowed, maxSessions, activeSessions, reserved, available, freeMemoryMb, memory, network, appData }. */
     @Get("/health")
     public JsonNode health() {
         SessionManager.Capacity capacity = sessions.capacity();
@@ -61,7 +63,28 @@ public class RunnerController {
         out.put("reserved", capacity.reserved());
         out.put("available", revision == null ? 0 : capacity.available());
         out.put("freeMemoryMb", capacity.freeMemoryMb());
+        // memory: the budget of a default session (memory "automatic": navigator.deviceMemory as Chrome reports it on this machine)
+        out.set("memory", mapper.valueToTree(MemoryBudget.automatic(settings.getVmHeapMb(), settings.getVmHeapMaxMb())));
+        ObjectNode network = out.putObject("network");
+        settings.allowedHostList().forEach(network.putArray("allowedHosts")::add);
+        network.put("allowPrivateNetwork", settings.allowPrivateNetworkEnabled());
+        out.put("appData", settings.appDataPath() != null);
         return out;
+    }
+
+    /** The config a session gets when the client says nothing (the site's defaults with the server exceptions), asked once to a short-lived sidecar, then cached. */
+    @Get("/defaults")
+    public JsonNode sessionDefaults() {
+        JsonNode cached = defaults;
+        if (cached != null) return cached;
+        ObjectNode args = mapper.createObjectNode();
+        args.set("policy", sessions.policy());
+        args.set("limits", sessions.limits());
+        try (SidecarProcess sidecar = launcher.start("defaults")) {
+            cached = sidecar.call("defaults", args, Duration.ofSeconds(20));
+        }
+        defaults = cached;
+        return cached;
     }
 
     @Get("/stats")

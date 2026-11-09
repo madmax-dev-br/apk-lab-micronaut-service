@@ -11,9 +11,12 @@ services:
     environment:
       RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN}
       RUNNER_MAX_SESSIONS: ${RUNNER_MAX_SESSIONS:-2}
-      RUNNER_ALLOWED_HOSTS: ${RUNNER_ALLOWED_HOSTS:-}
+      RUNNER_ALLOWED_HOSTS: ${RUNNER_ALLOWED_HOSTS:-*}
+      RUNNER_ALLOW_PRIVATE_NETWORK: ${RUNNER_ALLOW_PRIVATE_NETWORK:-false}   # true lets apps reach loopback / private / link-local addresses
+      RUNNER_APP_DATA_DIR: /app/data/app-data
       RUNNER_ALLOW_PLUGINS: ${RUNNER_ALLOW_PLUGINS:-false}
       RUNNER_CORS_ORIGINS: ${RUNNER_CORS_ORIGINS:-}
+    volumes: ["runner-data:/app/data"]   # app data kept between sessions, per X-Client-Id
     # ports: ["127.0.0.1:8081:8081"]
     mem_limit: 8g
     restart: unless-stopped
@@ -36,3 +39,4 @@ services:
 
 volumes:
   queue-data: {}
+  runner-data: {}

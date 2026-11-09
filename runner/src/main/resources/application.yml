@@ -35,14 +35,15 @@ runner:
   start-timeout-seconds: ${RUNNER_SIDECAR_START_TIMEOUT_S:30}
   call-margin-seconds: ${RUNNER_SIDECAR_CALL_MARGIN_S:15}
   max-line-mb: ${RUNNER_SIDECAR_MAX_LINE_MB:64}
-  allowed-hosts: ${RUNNER_ALLOWED_HOSTS:}
+  allowed-hosts: ${RUNNER_ALLOWED_HOSTS:*}                  # operator cap; "*" like the site, "none" = mocks only
+  allow-private-network: ${RUNNER_ALLOW_PRIVATE_NETWORK:false}   # 1/true: apps may reach loopback, private and link-local addresses
   allow-plugins: ${RUNNER_ALLOW_PLUGINS:false}
   plugin-max: ${RUNNER_PLUGIN_MAX:4}
   plugin-heap-mb: ${RUNNER_PLUGIN_HEAP_MB:64}
   plugin-busy-seconds: ${RUNNER_PLUGIN_BUSY_S:5}
   plugin-max-run-seconds: ${RUNNER_PLUGIN_MAX_RUN_S:0}
   plugin-max-code-kb: ${RUNNER_PLUGIN_MAX_CODE_KB:256}
-  app-data-dir: ${RUNNER_APP_DATA_DIR:}
+  app-data-dir: ${RUNNER_APP_DATA_DIR:data/app-data}       # app data kept between sessions per X-Client-Id; "off" disables
   runtime-dir: ${APK_LAB_RUNTIME_DIR:}
   node: ${RUNNER_NODE:node}
   sidecar-script: ${RUNNER_SIDECAR_SCRIPT:sidecar/vm-host.mjs}

@@ -35,21 +35,28 @@ public record SessionConfig(
         @Nullable @Valid @Size(max = 50) List<@Valid EndpointMock> endpointMocks,
         /** 0 (defaults) or one of 60, 120, 300: how long one input event may run in the VM. */
         @Nullable @Min(0) @Max(300) Integer eventSeconds,
-        /** "strict" (default: an unimplemented API fails with an error naming it), "void", "primitives" or "all" (tolerant: stubs, always reported). */
+        /** "primitives" (default, like the site), "strict" (an unimplemented API fails with an error naming it), "void" or "all" (tolerant: stubs, always reported). */
         @Nullable @Pattern(regexp = "strict|off|void|primitives|all") String missingApis,
         @Nullable Boolean strictCrash,
         /** Java heap budget of the VM in MiB: 0 (automatic) or 512, 1024, 2048, 3072, 4096 (bounded by the runner's RUNNER_MAX_MEMORY_MIB). */
         @Nullable @Min(0) @Max(4096) Integer memoryMiB,
         @Nullable @Valid AppData appData,
-        /** "progressive" (default) or "full". */
+        /** "full" (default on the server: a screenshot never captures a reduced frame) or "progressive" (reduced while the screen moves). */
         @Nullable @Pattern(regexp = "progressive|full") String raster,
+        /** "Resolução no movimento" with raster "progressive": 1, 0.75, 0.5 (default), 0.35 or 0.25; applied live. */
+        @Nullable @DecimalMin("0.25") @DecimalMax("1") Double rasterScale,
+        /** "Tela nova em baixa resolução" with raster "progressive": a new screen starts reduced (default true); applied live. */
+        @Nullable Boolean rasterNavigation,
         /** "on-demand" (default: Logcat lines leave the VM only while someone reads them) or "always". */
         @Nullable @Pattern(regexp = "on-demand|always") String logcat,
         @Nullable @Valid @Size(max = 32) List<@Valid PluginSpec> plugins,
         /** true (launcher Activity), false, or an Activity class name: launch right after loading. */
         @Nullable JsonNode launch
 ) {
-    public static SessionConfig empty() { return new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null); }
+    public static SessionConfig empty() { return new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null); }
+
+    /** The "Resolução no movimento" steps of the lab (runtime/motion-raster.js MOTION_SCALE_STEPS). */
+    public static final List<Double> RASTER_SCALE_STEPS = List.of(1.0, 0.75, 0.5, 0.35, 0.25);
 
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -71,7 +78,8 @@ public record SessionConfig(
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Battery(@Nullable @Min(0) @Max(100) Integer level, @Nullable Boolean charging) {}
 
-    /** allowedHosts: "host", "*.suffix", "host:port", an IP literal or "*" (each must also be allowed by the runner's RUNNER_ALLOWED_HOSTS). */
+    /** allowedHosts: "host", "*.suffix", "host:port", an IP literal or "*" (default ["*"], like the site; each must also be allowed by the runner's RUNNER_ALLOWED_HOSTS,
+     *  and loopback / private / link-local targets need RUNNER_ALLOW_PRIVATE_NETWORK). */
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Network(

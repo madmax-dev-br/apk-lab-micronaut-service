@@ -31,6 +31,9 @@
   <a href="#docker">Docker Compose</a>
   <a href="#autenticacao">Autenticação</a>
   <a href="#configuracao">Configuração</a>
+  <a href="#padroes">Padrões iguais ao site</a>
+  <a href="#memoria">Memória da VM</a>
+  <a href="#raster">Resolução no movimento</a>
   <a href="#testes">Testes</a>
   <a href="#node">Relação com o serviço Node</a>
 </aside>
@@ -69,7 +72,7 @@
 <p>A VM do APK Web Lab é JavaScript: módulos ES, WebAssembly (CanvasKit/Skia, ICU, SQLite, zlib, codecs) e semântica de Worker. Ela não roda dentro da JVM como está. As opções eram reescrever a VM em Java (fora de questão: o comportamento vem do runtime publicado e tem de ser o mesmo do site) ou hospedá-la num processo que já entende tudo isso. O Node 22+ entende: <code>worker_threads</code>, <code>fetch</code>, WebAssembly e módulos ES, e o mesmo shim já é usado pelo serviço Node.</p>
 <ul>
   <li><strong>Isolamento:</strong> um processo por sessão. Um crash, um loop ou falta de memória derruba só aquela sessão; o runner mostra o erro com as últimas linhas do sidecar e permite <code>POST /sessions/{id}/restart</code>.</li>
-  <li><strong>Memória:</strong> <code>--max-old-space-size</code> no processo (<code>RUNNER_SIDECAR_HEAP_MB</code>) e <code>resourceLimits</code> no Worker da VM (<code>RUNNER_VM_HEAP_MB</code>, ampliado por <code>memoryMiB</code> da sessão até <code>RUNNER_VM_HEAP_MAX_MB</code>).</li>
+  <li><strong>Memória:</strong> <code>--max-old-space-size</code> no processo (<code>RUNNER_SIDECAR_HEAP_MB</code>) e <code>resourceLimits</code> no Worker da VM (2 × o orçamento Java da sessão + 1024 MB, no mínimo <code>RUNNER_VM_HEAP_MB</code> e no máximo <code>RUNNER_VM_HEAP_MAX_MB</code>; veja <a href="#memoria">Memória da VM</a>).</li>
   <li><strong>Ambiente limpo:</strong> o sidecar recebe só <code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code> e o diretório do runtime; nunca o <code>RUNNER_TOKEN</code> nem outras variáveis do runner.</li>
   <li><strong>Direção futura (não implementada):</strong> GraalJS + GraalWasm poderiam hospedar a VM dentro da JVM, sem processo extra. Faltam a semântica de <code>worker_threads</code>/Worker, o desempenho de WebAssembly equivalente ao V8 e uma validação completa do runtime nesse ambiente.</li>
 </ul>
@@ -80,7 +83,7 @@
 {"id": 7, "op": "tap", "args": {"selector": {"testTag": "salvar"}}}
 
 # sidecar -> runner (stdout)
-{"event": "ready", "protocol": 1, "revision": "c6940189447d", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
+{"event": "ready", "protocol": 1, "revision": "79526b6931c6", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
 {"id": 7, "ok": true, "result": {"via": "semantics", "element": {...}, "snapshot": {...}}}
 {"id": 8, "ok": false, "error": {"status": 404, "code": "element-not-found", "message": "...", "details": {"activity": "..."}}}
 {"event": "logcat", "data": [{"seq": 41, "level": "W", "tag": "APKWebLab", "message": "..."}]}       # só com assinatura
@@ -116,7 +119,9 @@ export RUNNER_TOKEN=$(openssl rand -hex 24)
 export QUEUE_CLIENTS="eu:$(openssl rand -hex 16)" QUEUE_RUNNERS="http://127.0.0.1:8081" QUEUE_RUNNER_TOKEN=$RUNNER_TOKEN
 ./gradlew :queue:run              # http://127.0.0.1:8080</code></pre>
 <pre><code>curl -s http://127.0.0.1:8081/health
-# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"c6940189447d","maxSessions":2,"available":2,...}</code></pre>
+# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"79526b6931c6","maxSessions":2,"available":2,
+#  "memory":{"budgetMiB":1024,"maxHeapObjects":671088,"source":"navigator.deviceMemory=8","deviceMemory":8.0,"workerHeapMb":3072},
+#  "network":{"allowedHosts":["*"],"allowPrivateNetwork":false},"appData":true,...}</code></pre>
 <p>O runtime vem do repositório público do site, <strong>no commit fixado</strong> em <code>sidecar/runtime.lock.json</code> (revisão do <code>build-info.json</code>, lista de arquivos, tamanho e SHA-256). Uma publicação nova do site não muda o que este repositório roda. Para usar outra cópia do runtime (por exemplo, um <code>dist/</code> que você construiu), aponte <code>APK_LAB_RUNTIME_DIR</code> para ela. <code>node sidecar/fetch-runtime.mjs --check</code> confere uma cópia existente; <code>--base &lt;url&gt;</code> baixa de um espelho (os hashes continuam valendo).</p>
 
 <h2 id="docker">Docker Compose</h2>
@@ -143,13 +148,14 @@ curl -s -H "Authorization: Bearer $QUEUE_CLIENT_TOKEN" http://127.0.0.1:8080/sta
 <tr><td><code>RUNNER_MAX_APK_MB</code>, <code>RUNNER_MAX_REQUEST_SIZE</code></td><td>200, 256MB</td><td>Tamanho do APK e do corpo HTTP.</td></tr>
 <tr><td><code>RUNNER_IDLE_TIMEOUT_S</code>, <code>RUNNER_SESSION_MAX_S</code></td><td>600, 3600</td><td>Sessão parada (streams abertos contam como uso) e idade máxima.</td></tr>
 <tr><td><code>RUNNER_SIDECAR_HEAP_MB</code></td><td>512</td><td><code>--max-old-space-size</code> do processo Node.</td></tr>
-<tr><td><code>RUNNER_VM_HEAP_MB</code>, <code>RUNNER_VM_HEAP_MAX_MB</code></td><td>2048, 6144</td><td>Heap do Worker da VM (<code>resourceLimits</code>).</td></tr>
+<tr><td><code>RUNNER_VM_HEAP_MB</code>, <code>RUNNER_VM_HEAP_MAX_MB</code></td><td>2048, 6144</td><td>Heap do Worker da VM (<code>resourceLimits</code>): 2 × o orçamento Java + 1024 MB, entre os dois valores. Um orçamento de 1024 MiB (o automático numa máquina de 8 GiB ou mais) dá 3072 MB.</td></tr>
 <tr><td><code>RUNNER_MAX_MEMORY_MIB</code></td><td>2048</td><td>Maior <code>memoryMiB</code> (orçamento Java da VM) que uma sessão pode pedir.</td></tr>
 <tr><td><code>RUNNER_LOAD_TIMEOUT_S</code>, <code>RUNNER_OPERATION_TIMEOUT_S</code></td><td>120, 45</td><td>Timeouts de carga e de operação.</td></tr>
 <tr><td><code>RUNNER_SIDECAR_START_TIMEOUT_S</code>, <code>RUNNER_SIDECAR_CALL_MARGIN_S</code>, <code>RUNNER_SIDECAR_MAX_LINE_MB</code></td><td>30, 15, 64</td><td>Protocolo do sidecar.</td></tr>
-<tr><td><code>RUNNER_ALLOWED_HOSTS</code></td><td>vazio</td><td>Política do operador: hosts que as sessões podem liberar em <code>network.allowedHosts</code> e usar como destino de <code>hostMap</code> ou proxy (<code>host</code>, <code>*.sufixo</code>, <code>host:porta</code>, <code>*</code>). Vazio: nenhum acesso real à rede; mocks continuam funcionando.</td></tr>
+<tr><td><code>RUNNER_ALLOWED_HOSTS</code></td><td><code>*</code></td><td>Teto do operador: hosts que as sessões podem liberar em <code>network.allowedHosts</code> e usar como destino de <code>hostMap</code> ou proxy (<code>host</code>, <code>*.sufixo</code>, <code>host:porta</code>, <code>*</code>); também é a lista padrão de uma sessão. <code>*</code> (padrão, como o site) libera todo host público; <code>none</code>: nenhum acesso real à rede, só mocks.</td></tr>
+<tr><td><code>RUNNER_ALLOW_PRIVATE_NETWORK</code></td><td>false</td><td><code>true</code>/<code>1</code> deixa o app alcançar loopback, redes privadas (RFC 1918, fc00::/7) e link-local (169.254.0.0/16, fe80::/10). Sem ele esses alvos são recusados depois da resolução DNS (<a href="seguranca.html#rede">Rede</a>).</td></tr>
 <tr><td><code>RUNNER_ALLOW_PLUGINS</code></td><td>false</td><td>Plugins no servidor (veja <a href="seguranca.html#plugins">Segurança</a>). Com eles: <code>RUNNER_PLUGIN_MAX</code> (4), <code>RUNNER_PLUGIN_HEAP_MB</code> (64), <code>RUNNER_PLUGIN_BUSY_S</code> (5), <code>RUNNER_PLUGIN_MAX_RUN_S</code> (0 = sem limite), <code>RUNNER_PLUGIN_MAX_CODE_KB</code> (256).</td></tr>
-<tr><td><code>RUNNER_APP_DATA_DIR</code></td><td>vazio</td><td>Guarda os dados do app entre sessões (<code>appData.keep</code>), separados por <code>X-Client-Id</code>.</td></tr>
+<tr><td><code>RUNNER_APP_DATA_DIR</code></td><td><code>data/app-data</code></td><td>Onde ficam os dados do app entre sessões (<code>appData.keep</code>, padrão <code>true</code> como no site), separados por <code>X-Client-Id</code>. Caminho relativo à raiz do repositório; a pasta é criada quando precisa e o git a ignora. <code>off</code> desliga.</td></tr>
 <tr><td><code>APK_LAB_RUNTIME_DIR</code></td><td>vendor/apk-lab</td><td>Diretório do runtime.</td></tr>
 <tr><td><code>RUNNER_NODE</code>, <code>RUNNER_SIDECAR_SCRIPT</code>, <code>RUNNER_WORK_DIR</code></td><td>node, sidecar/vm-host.mjs, (tmp)</td><td>Executável do Node, script do sidecar, diretório dos APKs das sessões.</td></tr>
 </table>
@@ -169,11 +175,35 @@ curl -s -H "Authorization: Bearer $QUEUE_CLIENT_TOKEN" http://127.0.0.1:8080/sta
 <tr><td><code>QUEUE_CORS_ORIGINS</code>, <code>QUEUE_ALLOW_PLUGINS</code></td><td>vazio, false</td><td>CORS da API da fila; passos e configs com plugins.</td></tr>
 </table>
 
+<h2 id="padroes">Padrões iguais ao site</h2>
+<p>Uma sessão criada sem config se comporta como o site para um visitante novo (<code>defaultDeviceSettings()</code> de <code>device-settings.js</code> e os Controles da página). A resposta de <code>POST /sessions</code> traz <code>config</code> com os padrões preenchidos e <code>GET /defaults</code> mostra a config padrão deste runner.</p>
+<table>
+<tr><th></th><th>Site (visitante novo)</th><th>Runner</th><th>Observação</th></tr>
+<tr><td>Dispositivo</td><td>phone, retrato, fonte 1, <code>en-US</code>, tema claro, 24 h, fuso do host, animações 1×, bateria 80 % sem carregar, online, navegação por gestos</td><td>igual</td><td>o <code>sanitizeSettings</code> do próprio bundle, no sidecar</td></tr>
+<tr><td>Rede</td><td><code>allowedHosts ["*"]</code>, sem relay, sem redirecionamentos</td><td>igual</td><td>alvos privados recusados (<a href="seguranca.html#rede">Rede</a>)</td></tr>
+<tr><td>Memória da VM</td><td>automática (<code>navigator.deviceMemory</code>)</td><td>igual</td><td>8 GiB ou mais → 1024 MiB = 671.088 objetos</td></tr>
+<tr><td>APIs ausentes</td><td><code>primitives</code></td><td><code>primitives</code></td><td>antes o runner usava <code>strict</code></td></tr>
+<tr><td>Encerrar no crash</td><td>não</td><td><code>strictCrash: false</code></td><td></td></tr>
+<tr><td>Tempo por evento</td><td>padrão (25 s)</td><td><code>eventSeconds: 0</code></td><td></td></tr>
+<tr><td>Logcat</td><td>sob demanda</td><td><code>on-demand</code></td><td></td></tr>
+<tr><td>Dados do app</td><td>mantidos entre execuções</td><td><code>appData.keep: true</code> em <code>data/app-data</code>, por <code>X-Client-Id</code></td><td><code>RUNNER_APP_DATA_DIR=off</code> desliga</td></tr>
+<tr><td>Resolução no movimento</td><td>0,5; tela nova reduzida</td><td><code>rasterScale: 0.5</code>, <code>rasterNavigation: true</code></td><td>valem com <code>raster: "progressive"</code></td></tr>
+<tr><td>WebView</td><td>ligado</td><td><strong>desligado</strong></td><td>exceção: não há navegador no servidor</td></tr>
+<tr><td>Raster</td><td>progressivo</td><td><strong><code>full</code></strong></td><td>exceção: uma captura nunca pega um quadro reduzido</td></tr>
+<tr><td>Diálogos de permissão</td><td>o usuário toca</td><td><strong><code>dismiss</code></strong></td><td>exceção: não há quem toque; mude com <code>permissions.dialogs</code></td></tr>
+</table>
+
+<h2 id="memoria">Memória da VM</h2>
+<p>Com memória automática (<code>memoryMiB: 0</code>), o <code>heapLimitFor</code> do lab (<code>runtime/memory-budget.js</code>) usa <code>navigator.deviceMemory</code>: orçamento = GiB × 128 MiB, entre 96 e 1024 MiB, a 1600 bytes por objeto. O Node não tem esse valor e a VM caía nos 262.144 objetos fixos do lab — num app real isso dava tela branca, 81 % do limite ocupado e coletas de segundos. O shim do Worker no sidecar (<code>sidecar/lib/vm-worker.mjs</code>) define <code>navigator.deviceMemory</code> como o Chrome faria nesta máquina: a RAM em GiB arredondada para baixo a uma potência de 2, entre 0,25 e 8 (num contêiner, o limite do cgroup quando é menor). Com 8 GiB ou mais: 1024 MiB = <strong>671.088 objetos</strong> e heap do Worker de 3072 MB. <code>GET /health</code> (calculado em Java, <code>MemoryBudget</code>) e a descrição de cada sessão (calculada no sidecar) trazem <code>memory: { budgetMiB, maxHeapObjects, source, deviceMemory, workerHeapMb }</code>; a sessão também traz <code>liveObjects</code> e <code>vmLimit</code> do último snapshot. <code>memoryMiB</code> (512 a 4096, até <code>RUNNER_MAX_MEMORY_MIB</code>) continua fixando um orçamento.</p>
+
+<h2 id="raster">Resolução no movimento</h2>
+<p>Com <code>raster: "progressive"</code> o Worker redesenha em escala reduzida enquanto a tela se mexe e em densidade total quando ela para. <code>rasterScale</code> (1, 0.75, 0.5, 0.35 ou 0.25; padrão 0.5) é a escala no movimento e <code>rasterNavigation</code> (padrão <code>true</code>) faz uma tela nova começar reduzida por 400 ms. Os dois valem na carga e ao vivo: o <code>PATCH</code> manda a mensagem <code>raster-settings</code> do Worker e responde <code>applied: [{"key": "raster", "raster": {"scale", "enabled", "navigation"}}]</code>. O padrão do servidor é <code>raster: "full"</code> (trocar pede <code>POST /sessions/{id}/restart</code>); <code>screenshot.png?waitReady=1</code> espera a tela pronta, que só vem depois do quadro em densidade total, então a captura sai sempre do tamanho cheio.</p>
+
 <h2 id="testes">Testes</h2>
 <pre><code>./gradlew test     # unitários: sidecar falso, runners falsos; sem rede, sem APKs</code></pre>
-<p>Os testes unitários cobrem a fila (prioridade, justiça, capacidade, retentativas, cancelamento, timeout, expiração de leases, retenção, store em arquivo), validação, autenticação, CORS, plugins desligados por padrão e o protocolo do sidecar com um sidecar falso (crash, timeout, linha grande demais, linha inválida, restart). Os testes de ponta a ponta rodam só com as duas variáveis:</p>
+<p>Os testes unitários cobrem a fila (prioridade, justiça, capacidade, retentativas, cancelamento, timeout, expiração de leases, retenção, store em arquivo), validação, autenticação, CORS, plugins desligados por padrão, os padrões iguais ao site (orçamento de memória, política de rede, dados do app, <code>rasterScale</code>), o protocolo do sidecar com um sidecar falso (crash, timeout, linha grande demais, linha inválida, restart) e os testes do próprio sidecar (<code>node --test sidecar/test/</code>: <code>navigator.deviceMemory</code>, recusa de alvos privados, config padrão, <code>raster-settings</code> ao vivo). Os testes de ponta a ponta rodam só com as duas variáveis:</p>
 <pre><code>APK_LAB_RUNTIME_DIR=$PWD/vendor/apk-lab APK_LAB_TEST_APK_DIR=/caminho/para/apks-de-teste ./gradlew test</code></pre>
-<p>Eles usam APKs sintéticos de teste (uma sonda de rede, um app Compose de exemplo), nunca APKs de terceiros, e não acessam a internet: as respostas vêm de mocks e o redirecionamento de host vai para um servidor local. O CI do GitHub roda só os unitários.</p>
+<p>Eles usam APKs sintéticos de teste (uma sonda de rede, um app Compose de exemplo), nunca APKs de terceiros, e não acessam a internet: as respostas vêm de mocks e o redirecionamento de host vai para um servidor local (com <code>RUNNER_ALLOW_PRIVATE_NETWORK</code> ligado nesse teste; outro teste confere que, sem ele, o mesmo destino é recusado). O CI do GitHub roda só os unitários.</p>
 
 <h2 id="node">Relação com o serviço Node</h2>
 <p>O <a href="https://github.com/madmax-dev-br/apk-lab-node-service">apk-lab-node-service</a> roda a VM dentro do próprio processo Node do serviço. Este repositório tem a mesma API (caminhos, corpos, formato de erro <code>{"error": {"code", "message", "details"}}</code>, eventos SSE) e os mesmos passos de job; as diferenças:</p>

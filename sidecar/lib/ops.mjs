@@ -1,7 +1,8 @@
 // The operations of the sidecar protocol: one per runner endpoint. Each one validates its arguments, calls the session (lib/session.mjs) and returns plain JSON.
 // HTTP concerns (auth, CORS, multipart, SSE, capacity) live in the Micronaut runner; this file only knows sessions.
 import { HttpError, badRequest } from './errors.mjs';
-import { validateConfig } from './config.mjs';
+import { validateConfig, withDefaults, sessionDefaults } from './config.mjs';
+import { hostDeviceMemory, memoryReport, workerHeapMb } from './memory.mjs';
 import { Session, publicSnapshot, inventorySummary } from './session.mjs';
 import { reloadModeFrom, readyFlagFrom, screenReadyOut, READY_TIMEOUT_MS, MAX_WAIT_MS, SERVICE_PLUGIN_TEMPLATES } from './readiness.mjs';
 
@@ -10,6 +11,8 @@ const INPUT_TYPES = ['click', 'input', 'check', 'focus', 'press', 'scroll', 'scr
 const INTENT_KEYS = ['action', 'data', 'category', 'categories', 'extras', 'type', 'component', 'flags'];
 const num = (value, fallback, min, max) => { if (value === null || value === undefined || value === '') return fallback; const n = Number(value); if (!Number.isFinite(n)) throw badRequest(`not a number: ${value}`); return Math.min(max, Math.max(min, n)); };
 const conflict = (code, message) => new HttpError(409, code, message);
+/** The runner's policy when init does not say otherwise: every public host (private targets refused unless allowPrivateNetwork), no plugins. */
+const DEFAULT_POLICY = Object.freeze({ allowedHosts: ['*'], allowPrivateNetwork: false, pluginsAllowed: false, maxPlugins: 4, maxPluginCodeBytes: 256 * 1024, maxMemoryMiB: 2048 });
 
 function selectorFrom(args) {
   const source = args?.selector ?? (args?.key !== undefined ? { key: args.key } : null);
@@ -66,21 +69,28 @@ export function createOps({ bundle, painter, rasterStats, send, log, readApk }) 
   const table = {
     ping: () => ({ pong: true, revision: bundle.info.revision }),
     templates: () => [...(bundle.PLUGIN_TEMPLATES ?? []), ...SERVICE_PLUGIN_TEMPLATES].map(t => ({ id: t.id, name: t.name, description: t.description, code: t.code })),
-    /** { sessionId, policy: { allowedHosts, pluginsAllowed, maxPlugins, maxPluginCodeBytes, maxMemoryMiB }, limits: { vmHeapMb, vmHeapMaxMb, loadTimeoutMs, operationTimeoutMs, plugins: {...} }, appDataDir } */
+    /** The defaults of a session for this policy (the site's, with the server exceptions) and the memory budget of a default session on this machine. */
+    defaults: args => {
+      const p = { ...DEFAULT_POLICY, ...(args.policy ?? policy ?? {}) }, limits = { vmHeapMb: 2048, vmHeapMaxMb: 6144, ...(args.limits ?? {}) };
+      const memory = memoryReport(bundle.memoryBudget, { memoryMiB: 0, deviceMemory: hostDeviceMemory() });
+      const device = bundle.defaultDeviceSettings ? Object.fromEntries(Object.entries(bundle.defaultDeviceSettings()).filter(([key]) => !['network', 'memoryMiB', 'eventSeconds', 'location', 'raster', 'layoutBounds'].includes(key))) : null;
+      return { config: sessionDefaults(p), device, memory: { ...memory, workerHeapMb: workerHeapMb(memory.budgetMiB, limits) }, webview: false };
+    },
+    /** { sessionId, policy: { allowedHosts, allowPrivateNetwork, pluginsAllowed, maxPlugins, maxPluginCodeBytes, maxMemoryMiB }, limits: { vmHeapMb, vmHeapMaxMb, loadTimeoutMs, operationTimeoutMs, plugins: {...} }, appDataDir } */
     init: args => {
       if (session) throw conflict('already-initialized', 'This sidecar already hosts a session');
       if (typeof args.sessionId !== 'string' || !args.sessionId) throw badRequest('init needs sessionId');
-      policy = { allowedHosts: [], pluginsAllowed: false, maxPlugins: 4, maxPluginCodeBytes: 256 * 1024, maxMemoryMiB: 2048, ...(args.policy ?? {}) };
+      policy = { ...DEFAULT_POLICY, ...(args.policy ?? {}) };
       const limits = { vmHeapMb: 2048, vmHeapMaxMb: 6144, loadTimeoutMs: 120000, operationTimeoutMs: 45000, ...(args.limits ?? {}), plugins: { heapMb: 64, busySeconds: 5, maxRunSeconds: 0, ...(args.limits?.plugins ?? {}) } };
       session = new Session({ id: args.sessionId, owner: args.owner ?? null, bundle, painter, limits, policy, appDataDir: args.appDataDir || null, log });
       attach(session);
       return { sessionId: session.id, revision: bundle.info.revision };
     },
-    validateConfig: args => validateConfig(args.config ?? {}, { modules: bundle, policy: policy ?? { allowedHosts: [], pluginsAllowed: false, maxPlugins: 4, maxPluginCodeBytes: 256 * 1024, maxMemoryMiB: 2048 } }, { partial: args.partial === true }),
+    validateConfig: args => validateConfig(args.config ?? {}, { modules: bundle, policy: policy ?? DEFAULT_POLICY }, { partial: args.partial === true }),
     load: async args => {
       const s = need();
       if (typeof args.apkPath !== 'string') throw badRequest('load needs apkPath');
-      const config = validateConfig(args.config ?? {}, { modules: bundle, policy });
+      const config = withDefaults(validateConfig(args.config ?? {}, { modules: bundle, policy }), policy);   // the site's defaults for every key the client left out
       const apk = await readApk(args.apkPath);
       await s.load(apk, config);
       return { session: s.describe(), inventory: inventorySummary(s.inventory), config: s.config, snapshot: s.snapshot ? summary(s) : null };

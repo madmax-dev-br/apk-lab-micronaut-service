@@ -45,8 +45,9 @@
 
 <h2 id="rede">Rede</h2>
 <ul>
-  <li>Por padrão (<code>RUNNER_ALLOWED_HOSTS</code> vazio) as sessões não alcançam nenhum host real: o app só recebe respostas de mocks. O operador decide quais hosts podem ser liberados por sessão, redirecionados ou usados como proxy.</li>
-  <li>Um redirecionamento (<code>hostMap</code>) para <code>127.0.0.1</code> alcança serviços da própria máquina do runner: só inclua loopback ou redes internas em <code>RUNNER_ALLOWED_HOSTS</code> quando os usuários forem confiáveis.</li>
+  <li>Como no site, uma sessão alcança todo host público por padrão (<code>allowedHosts ["*"]</code>, teto <code>RUNNER_ALLOWED_HOSTS="*"</code>). O operador pode restringir os hosts que as sessões liberam, redirecionam ou usam como proxy (<code>none</code> = só mocks).</li>
+  <li><strong>Rede interna recusada.</strong> O servidor não é o navegador de um visitante: "qualquer host" incluiria os serviços da própria máquina, a rede privada e o endpoint de metadados da nuvem. Toda troca HTTP da VM resolve o nome antes (<code>dns.lookup</code>, todos os endereços, no shim do Worker e no worker de rede do bundle) e é recusada quando algum endereço é loopback (127.0.0.0/8, ::1), privado (10/8, 172.16/12, 192.168/16, fc00::/7), link-local (169.254.0.0/16 — inclusive 169.254.169.254 —, fe80::/10) ou não especificado (0.0.0.0/8, ::). Vale para a requisição direta, para cada salto de redirecionamento e para <code>hostMap</code>. O app recebe uma <code>java.io.IOException</code> que nomeia a política (<code>NetworkPolicyError: RUNNER_ALLOW_PRIVATE_NETWORK: ...</code>) e o log de rede mostra a falha. Mocks respondem antes de qualquer rede.</li>
+  <li><code>RUNNER_ALLOW_PRIVATE_NETWORK=true</code> libera esses alvos (homologação local, por exemplo): ligue só para usuários confiáveis, num runner isolado. Limite conhecido: um nome cuja resposta DNS muda entre a verificação e a conexão (DNS rebinding) não é pego; isole o runner na rede também.</li>
   <li><code>apkUrl</code> da fila só baixa de hosts em <code>QUEUE_APK_URL_HOSTS</code>, sem seguir redirecionamentos, com limite de tamanho.</li>
 </ul>
 
@@ -63,7 +64,7 @@
 <table>
 <tr><th>Recurso</th><th>Limite</th></tr>
 <tr><td>Sessões simultâneas</td><td><code>RUNNER_MAX_SESSIONS</code>; a fila lê a capacidade de <code>/health</code> e não passa dela.</td></tr>
-<tr><td>Memória por sessão</td><td>Processo Node: <code>RUNNER_SIDECAR_HEAP_MB</code>; Worker da VM: <code>RUNNER_VM_HEAP_MB</code> (até <code>RUNNER_VM_HEAP_MAX_MB</code> com <code>memoryMiB</code>); orçamento Java da VM: <code>memoryMiB</code> até <code>RUNNER_MAX_MEMORY_MIB</code>.</td></tr>
+<tr><td>Memória por sessão</td><td>Processo Node: <code>RUNNER_SIDECAR_HEAP_MB</code>; Worker da VM: 2 × orçamento Java + 1024 MB, entre <code>RUNNER_VM_HEAP_MB</code> e <code>RUNNER_VM_HEAP_MAX_MB</code>; orçamento Java da VM: automático (<code>navigator.deviceMemory</code> desta máquina, até 1024 MiB = 671.088 objetos) ou <code>memoryMiB</code> até <code>RUNNER_MAX_MEMORY_MIB</code>.</td></tr>
 <tr><td>Tempo</td><td>Carga, operação, evento de entrada (<code>eventSeconds</code>), sessão parada, idade máxima da sessão, job e lease.</td></tr>
 <tr><td>Operações na fila de uma sessão</td><td>32 (depois, <code>429</code> com <code>Retry-After</code>).</td></tr>
 <tr><td>Itens por cliente</td><td><code>QUEUE_MAX_PER_CLIENT</code> rodando, <code>QUEUE_MAX_QUEUED_PER_CLIENT</code> na fila.</td></tr>

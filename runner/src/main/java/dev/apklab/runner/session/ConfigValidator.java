@@ -70,6 +70,9 @@ public class ConfigValidator {
         if (config.memoryMiB() != null && config.memoryMiB() > settings.getMaxMemoryMib()) {
             throw ApiException.forbidden("memory-policy", where + ".memoryMiB above the runner's limit (" + settings.getMaxMemoryMib() + " MiB, RUNNER_MAX_MEMORY_MIB)");
         }
+        if (config.rasterScale() != null && !SessionConfig.RASTER_SCALE_STEPS.contains(config.rasterScale())) {
+            throw ApiException.badRequest(where + ".rasterScale: one of 1, 0.75, 0.5, 0.35, 0.25 (default 0.5; used while the screen moves when raster is \"progressive\")");
+        }
         if (config.launch() != null && !(config.launch().isBoolean() || (config.launch().isTextual() && config.launch().asText().length() <= 500))) {
             throw ApiException.badRequest(where + ".launch: true, false or an Activity name");
         }

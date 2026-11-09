@@ -343,7 +343,7 @@ public class SessionsController {
 
     @Put("/{id}/plugins")
     public JsonNode setPlugins(@PathVariable String id, @Valid @Body Requests.Plugins body) {
-        SessionConfig asConfig = new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, body.plugins(), null);
+        SessionConfig asConfig = new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, body.plugins(), null);
         JsonNode checked = configs.check(asConfig, "config");
         RunnerSession session = sessions.get(id);
         ObjectNode args = mapper.createObjectNode();

@@ -44,9 +44,11 @@ class RunnerEndToEndTest implements TestPropertyProvider {
 
     @Override
     public Map<String, String> getProperties() {
-        return Map.of("runner.runtime-dir", System.getenv("APK_LAB_RUNTIME_DIR"), "runner.sidecar-script", "../sidecar/vm-host.mjs", "runner.token", TOKEN,
-                "runner.max-line-mb", "64", "runner.operation-timeout-seconds", "45", "runner.call-margin-seconds", "15", "runner.max-sessions", "3",
-                "runner.allowed-hosts", "127.0.0.1", "runner.allow-plugins", "true");
+        return Map.ofEntries(Map.entry("runner.runtime-dir", System.getenv("APK_LAB_RUNTIME_DIR")), Map.entry("runner.sidecar-script", "../sidecar/vm-host.mjs"), Map.entry("runner.token", TOKEN),
+                Map.entry("runner.max-line-mb", "64"), Map.entry("runner.operation-timeout-seconds", "45"), Map.entry("runner.call-margin-seconds", "15"), Map.entry("runner.max-sessions", "3"),
+                Map.entry("runner.allowed-hosts", "127.0.0.1"), Map.entry("runner.allow-plugins", "true"),
+                Map.entry("runner.allow-private-network", "true"),   // the host redirect test reaches a local server
+                Map.entry("runner.app-data-dir", "off"));
     }
 
     @BeforeEach

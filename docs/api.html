@@ -69,8 +69,13 @@
 
 <h2 id="servico">Runner: serviço</h2>
 <p class="endpoint"><span class="method">GET</span> /health <small>(público)</small></p>
-<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "c6940189447d",
- "pluginsAllowed": false, "maxSessions": 2, "activeSessions": 1, "reserved": 0, "available": 1, "freeMemoryMb": 14980}</code></pre>
+<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "79526b6931c6",
+ "pluginsAllowed": false, "maxSessions": 2, "activeSessions": 1, "reserved": 0, "available": 1, "freeMemoryMb": 14980,
+ "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8.0, "workerHeapMb": 3072},
+ "network": {"allowedHosts": ["*"], "allowPrivateNetwork": false}, "appData": true}</code></pre>
+<p><code>memory</code> é o orçamento de uma sessão padrão nesta máquina (<a href="index.html#memoria">Memória da VM</a>); cada sessão traz o seu em <code>session.memory</code>.</p>
+<p class="endpoint"><span class="method">GET</span> /defaults</p>
+<p>A config que uma sessão recebe quando o cliente não diz nada (<a href="index.html#padroes">padrões iguais ao site</a>), o dispositivo padrão do bundle e o orçamento de memória.</p>
 <p class="endpoint"><span class="method">GET</span> /stats</p>
 <p>Capacidade, sessões (estado, pid do sidecar, memória do processo Node, cache de rasters) e heap da JVM.</p>
 <p class="endpoint"><span class="method">GET</span> /plugin-templates</p>
@@ -90,14 +95,15 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/vnd.android.pac
 curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      -d "{\"apkBase64\": \"$(base64 &lt; app.apk | tr -d '\n')\", \"config\": {\"launch\": true}}" $R/sessions</code></pre>
 <pre><code>{"session": {"id": "5efd76bf-...", "state": "running", "packageName": "com.exemplo.app", "launcherActivity": "com.exemplo.app.MainActivity",
-             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "c6940189447d", ...},
+             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "79526b6931c6",
+             "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8, "workerHeapMb": 3072, "liveObjects": 40276, "vmLimit": 671088}, ...},
  "inventory": {"packageName": "...", "usesSdk": {"minSdkVersion": 24, "targetSdkVersion": 34}, "activities": [...], "usesPermissions": [...], ...},
  "config": { ...a config normalizada... },
  "snapshot": { ...resumo da tela, se já houver uma... }}</code></pre>
 <p>A sessão é criada em um processo sidecar novo; se a carga falhar (APK inválido, config recusada pelos sanitizadores, exceção do app), a sessão é fechada e o erro volta com o status certo.</p>
 
 <h2 id="config">Config da sessão</h2>
-<p>Todas as chaves são opcionais. Num <code>PATCH /sessions/{id}/config</code>, só as chaves presentes mudam; as marcadas com <em>reload</em> valem na próxima carga (<code>POST /restart</code>) e voltam em <code>restartRequired</code>.</p>
+<p>Todas as chaves são opcionais; as ausentes recebem os <a href="index.html#padroes">padrões iguais ao site</a> (a resposta da criação traz a config completa). Num <code>PATCH /sessions/{id}/config</code>, só as chaves presentes mudam; as marcadas com <em>reload</em> valem na próxima carga (<code>POST /restart</code>) e voltam em <code>restartRequired</code>.</p>
 <pre><code>{
   "device": {"screen": "phone", "orientation": "portrait", "connectivity": "online", "navigation": "gesture", "fontScale": 1.0,
              "animatorScale": 1, "statusBarHeightDp": 24, "darkTheme": false, "hour24": true, "locale": "pt-BR",
@@ -114,11 +120,13 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
                      "query": "ignore", "bodyContains": "", "status": 200, "reason": "",
                      "headers": [{"name": "Content-Type", "value": "application/json"}], "body": "{\"nome\": \"Ana\"}", "delayMs": 0}],
   "eventSeconds": 0,
-  "missingApis": "strict",      // reload; "void" | "primitives" | "all" = tolerante (stubs relatados no diagnóstico)
+  "missingApis": "primitives",  // reload; padrão como no site; "strict" | "void" | "all" (stubs sempre relatados no diagnóstico)
   "strictCrash": false,         // reload
   "memoryMiB": 0,               // reload; 0 = automático, ou 512 | 1024 | 2048 | 3072 | 4096 (até RUNNER_MAX_MEMORY_MIB)
   "appData": {"keep": true, "clear": false},   // reload
-  "raster": "progressive",      // reload; ou "full"
+  "raster": "full",             // reload; padrão no servidor, ou "progressive"
+  "rasterScale": 0.5,           // ao vivo; 1 | 0.75 | 0.5 | 0.35 | 0.25, escala no movimento com "progressive"
+  "rasterNavigation": true,     // ao vivo; tela nova começa reduzida com "progressive"
   "logcat": "on-demand",        // ou "always"
   "plugins": [],                // exige RUNNER_ALLOW_PLUGINS=true
   "launch": true                // só na criação: true, false ou o nome de uma Activity
@@ -126,7 +134,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <table>
 <tr><th>Chave</th><th>Regras</th></tr>
 <tr><td><code>device</code></td><td>Presets e valores do painel do lab: <code>screen</code> phone|compact|large|small|tablet, <code>orientation</code> portrait|landscape, <code>connectivity</code> online|offline|metered, <code>navigation</code> gesture|buttons, <code>fontScale</code> 0.85–2, <code>locale</code> <code>xx-YY</code>, <code>timeZone</code> IANA.</td></tr>
-<tr><td><code>network.allowedHosts</code></td><td><code>host</code>, <code>*.sufixo</code>, <code>host:porta</code>, IP ou <code>*</code>; cada entrada precisa caber em <code>RUNNER_ALLOWED_HOSTS</code> (403 <code>network-policy</code>).</td></tr>
+<tr><td><code>network.allowedHosts</code></td><td><code>host</code>, <code>*.sufixo</code>, <code>host:porta</code>, IP ou <code>*</code> (padrão <code>["*"]</code>); cada entrada precisa caber em <code>RUNNER_ALLOWED_HOSTS</code> (403 <code>network-policy</code>). Alvos em loopback, rede privada ou link-local só com <code>RUNNER_ALLOW_PRIVATE_NETWORK</code>.</td></tr>
 <tr><td><code>network.hostMap</code></td><td>Redireciona <code>from</code> (esquema, host, porta, curingas) para <code>to</code>; o destino também passa por <code>RUNNER_ALLOWED_HOSTS</code>. Até 50 regras.</td></tr>
 <tr><td><code>network.offline</code></td><td>A VM fica sem rede (ConnectivityManager incluso); mocks continuam respondendo.</td></tr>
 <tr><td><code>network.proxyUrl</code></td><td>Relay HTTPS (ou HTTP em loopback); <code>{url}</code> marca onde vai o destino codificado.</td></tr>
@@ -135,6 +143,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><code>ignoredActivities</code></td><td>Até 100; string ou <code>{"name", "enabled"}</code>.</td></tr>
 <tr><td><code>endpointMocks</code></td><td>Até 50; <code>method</code> ANY|GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS; <code>url</code> com <code>http(s)://</code> ou começando com <code>/</code> (qualquer host), <code>*</code> como curinga; <code>query</code> ignore|exact; <code>status</code> 200–599; corpo até 4 MiB (<code>body</code> ou <code>bodyBase64</code>); <code>delayMs</code> até 600000.</td></tr>
 <tr><td><code>eventSeconds</code></td><td>0 ou 60 | 120 | 300: quanto um evento de entrada pode rodar na VM.</td></tr>
+<tr><td><code>rasterScale</code>, <code>rasterNavigation</code></td><td>"Resolução no movimento" com <code>raster: "progressive"</code>: escala 1 | 0.75 | 0.5 | 0.35 | 0.25 (outro valor: 400) e tela nova reduzida. Valem ao vivo (<code>applied</code> traz <code>{"key": "raster", "raster": {...}}</code>).</td></tr>
 </table>
 
 <h2 id="ciclo">Ciclo de vida</h2>

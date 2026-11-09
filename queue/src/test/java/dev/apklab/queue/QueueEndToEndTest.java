@@ -56,6 +56,7 @@ class QueueEndToEndTest implements TestPropertyProvider {
             builder.environment().put("RUNNER_TOKEN", RUNNER_TOKEN);
             builder.environment().put("RUNNER_SIDECAR_SCRIPT", repo.resolve("sidecar/vm-host.mjs").toString());
             builder.environment().put("RUNNER_MAX_SESSIONS", "2");
+            builder.environment().put("RUNNER_APP_DATA_DIR", "off");
             builder.environment().put("RUNNER_WORK_DIR", Files.createTempDirectory("runner-e2e-work").toString());
             runner = builder.start();
             String base = "http://127.0.0.1:" + port;

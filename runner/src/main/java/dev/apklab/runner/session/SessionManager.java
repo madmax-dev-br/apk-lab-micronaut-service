@@ -117,6 +117,7 @@ public class SessionManager {
         ObjectNode policy = mapper.createObjectNode();
         ArrayNode hosts = policy.putArray("allowedHosts");
         settings.allowedHostList().forEach(hosts::add);
+        policy.put("allowPrivateNetwork", settings.allowPrivateNetworkEnabled());
         policy.put("pluginsAllowed", settings.isAllowPlugins());
         policy.put("maxPlugins", settings.getPluginMax());
         policy.put("maxPluginCodeBytes", settings.getPluginMaxCodeKb() * 1024);
@@ -124,7 +125,7 @@ public class SessionManager {
         return policy;
     }
 
-    private ObjectNode limits() {
+    public ObjectNode limits() {
         ObjectNode limits = mapper.createObjectNode();
         limits.put("vmHeapMb", settings.getVmHeapMb());
         limits.put("vmHeapMaxMb", settings.getVmHeapMaxMb());
@@ -138,10 +139,11 @@ public class SessionManager {
     }
 
     private String appDataDirFor(String namespace) {
-        if (settings.getAppDataDir().isBlank()) return null;
+        Path root = settings.appDataPath();
+        if (root == null) return null;
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest((namespace == null ? "default" : namespace).getBytes(StandardCharsets.UTF_8));
-            return Path.of(settings.getAppDataDir()).toAbsolutePath().resolve(HexFormat.of().formatHex(digest).substring(0, 16)).toString();
+            return root.resolve(HexFormat.of().formatHex(digest).substring(0, 16)).toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
