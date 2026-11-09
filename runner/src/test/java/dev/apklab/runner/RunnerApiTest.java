@@ -176,6 +176,47 @@ class RunnerApiTest {
     }
 
     @Test
+    void reloadAndReadinessReachTheSidecar() throws Exception {
+        String id = create(null);
+        TestHttp.Response recreate = http.post("/sessions/" + id + "/reload", Map.of());
+        assertEquals(200, recreate.status(), () -> String.valueOf(recreate.json()));
+        assertEquals("recreate", recreate.json().path("mode").asText(), "recreate is the default mode");
+        assertEquals("reopen", http.post("/sessions/" + id + "/reload", Map.of("mode", "reopen")).json().path("mode").asText());
+        TestHttp.Response badMode = http.post("/sessions/" + id + "/reload", Map.of("mode", "refresh"));
+        assertEquals(400, badMode.status());
+        assertTrue(badMode.json().path("error").path("message").asText().contains("recreate"), badMode.json()::toString);
+
+        TestHttp.Response ready = http.get("/sessions/" + id + "/ready");
+        assertEquals(200, ready.status());
+        assertTrue(ready.json().path("ready").asBoolean());
+        TestHttp.Response waitReady = http.post("/sessions/" + id + "/wait", Map.of("ready", true));
+        assertEquals(200, waitReady.status(), () -> String.valueOf(waitReady.json()));
+        assertTrue(waitReady.json().path("args").path("ready").asBoolean());
+        assertFalse(waitReady.json().path("args").has("selector"), "ready alone needs no selector");
+        assertTrue(waitReady.json().path("element").isNull());
+        TestHttp.Response both = http.post("/sessions/" + id + "/wait", Map.of("ready", true, "selector", Map.of("text", "Olá")));
+        assertEquals("Olá", both.json().path("args").path("selector").path("text").asText());
+        assertEquals(400, http.post("/sessions/" + id + "/wait", Map.of("timeoutMs", 100)).status(), "a wait needs a selector or ready");
+        assertEquals(400, http.post("/sessions/" + id + "/wait", Map.of("ready", "yes")).status(), "ready is a boolean");
+        TestHttp.Response timeout = http.post("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 1));
+        assertEquals(408, timeout.status());
+        assertEquals("ready-timeout", timeout.code());
+        assertEquals("quadro pendente", timeout.json().path("error").path("details").path("waitingFor").path(0).asText());
+
+        TestHttp.Response shot = http.get("/sessions/" + id + "/screenshot.png?waitReady=1&readyTimeoutMs=2500");
+        assertEquals(200, shot.status());
+        assertTrue(shot.header("x-screen-ready").contains("\"waitedMs\":2500"), shot.header("x-screen-ready"));
+        assertNull(http.get("/sessions/" + id + "/screenshot.png").header("x-screen-ready"), "only with waitReady");
+
+        Thread trigger = new Thread(() -> { try { Thread.sleep(700); http.post("/sessions/" + id + "/reload", Map.of()); } catch (InterruptedException ignored) { } });
+        trigger.start();
+        List<TestHttp.Sse> events = http.readEvents("/sessions/" + id + "/events", "ready", 1, Duration.ofSeconds(10));
+        trigger.join();
+        TestHttp.Sse flip = events.stream().filter(e -> "ready".equals(e.event())).findFirst().orElseThrow(() -> new AssertionError(events.toString()));
+        assertTrue(flip.data().path("ready").asBoolean());
+    }
+
+    @Test
     void pluginsAreDisabledByDefault() {
         TestHttp.Response withPlugins = http.postBytes("/sessions", TestHttp.fakeApk(), "application/octet-stream",
                 Map.of("X-APK-Config", "{\"plugins\":[{\"id\":\"p\",\"code\":\"lab.output.text('x')\"}]}"));

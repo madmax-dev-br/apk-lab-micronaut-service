@@ -145,7 +145,8 @@ public class HttpRunnerGateway implements RunnerGateway {
             try { json = mapper.readTree(response.body()); } catch (IOException ignored) { /* not JSON */ }
             throw RunnerError.fromResponse(ref.id(), response.statusCode(), json, "");
         }
-        return new Bytes(response.body(), response.headers().firstValue("content-type").orElse("application/octet-stream"), response.headers().firstValue("x-screenshot-notes").orElse(null));
+        return new Bytes(response.body(), response.headers().firstValue("content-type").orElse("application/octet-stream"), response.headers().firstValue("x-screenshot-notes").orElse(null),
+                response.headers().firstValue("x-screen-ready").orElse(null));
     }
 
     @Override

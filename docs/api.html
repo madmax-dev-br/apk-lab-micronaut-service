@@ -31,6 +31,7 @@
   <a href="#entrada">Navegação e entrada</a>
   <a href="#seletores">Seletores</a>
   <a href="#tela">Tela e screenshots</a>
+  <a href="#tela-pronta">Tela pronta</a>
   <a href="#inspecao">Inspeção da VM</a>
   <a href="#logs">Logcat, rede e eventos</a>
   <a href="#permissoes">Permissões e dados</a>
@@ -68,12 +69,12 @@
 
 <h2 id="servico">Runner: serviço</h2>
 <p class="endpoint"><span class="method">GET</span> /health <small>(público)</small></p>
-<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "93d82df0437e",
+<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "c6940189447d",
  "pluginsAllowed": false, "maxSessions": 2, "activeSessions": 1, "reserved": 0, "available": 1, "freeMemoryMb": 14980}</code></pre>
 <p class="endpoint"><span class="method">GET</span> /stats</p>
 <p>Capacidade, sessões (estado, pid do sidecar, memória do processo Node, cache de rasters) e heap da JVM.</p>
 <p class="endpoint"><span class="method">GET</span> /plugin-templates</p>
-<p>Os modelos de plugin do bundle (<code>id</code>, <code>name</code>, <code>description</code>, <code>code</code>).</p>
+<p>Os modelos de plugin do bundle e os deste serviço, como "Print na tela pronta" (<code>id</code>, <code>name</code>, <code>description</code>, <code>code</code>).</p>
 
 <h2 id="criar">Criar sessão</h2>
 <p class="endpoint"><span class="method">POST</span> /sessions</p>
@@ -89,7 +90,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/vnd.android.pac
 curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      -d "{\"apkBase64\": \"$(base64 &lt; app.apk | tr -d '\n')\", \"config\": {\"launch\": true}}" $R/sessions</code></pre>
 <pre><code>{"session": {"id": "5efd76bf-...", "state": "running", "packageName": "com.exemplo.app", "launcherActivity": "com.exemplo.app.MainActivity",
-             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "93d82df0437e", ...},
+             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "c6940189447d", ...},
  "inventory": {"packageName": "...", "usesSdk": {"minSdkVersion": 24, "targetSdkVersion": 34}, "activities": [...], "usesPermissions": [...], ...},
  "config": { ...a config normalizada... },
  "snapshot": { ...resumo da tela, se já houver uma... }}</code></pre>
@@ -153,10 +154,11 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/launch</code></td><td><code>{"activity"?: "com.exemplo.app.OutraActivity"}</code> → <code>{"launchMs", "snapshot"}</code></td></tr>
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/intent</code></td><td><code>{"action", "data", "category", "categories", "extras", "type", "component", "flags"}</code> → <code>{"deepLink", "snapshot"}</code></td></tr>
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/back</code></td><td>—</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/reload</code></td><td><code>{"mode": "recreate"}</code> (padrão; corpo opcional) ou <code>{"mode": "reopen"}</code> → <code>{"mode", "snapshot"}</code>. Os botões "Recriar" e "Reabrir" do site: <code>recreate</code> = <code>Activity.recreate()</code> (estado salvo e ViewModels retidos ficam, como numa rotação); <code>reopen</code> = instância nova com o mesmo Intent, sem estado salvo e com o <code>ViewModelStore</code> limpo (o conteúdo carrega de novo). Outro modo: 400.</td></tr>
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/tap</code></td><td><code>{"selector"}</code> ou <code>{"key"}</code> ou <code>{"x", "y"}</code>; <code>"longPress": true</code>. Compose com OnClick usa a ação de semântica; View clicável usa performClick; ponto usa ponteiro real. → <code>{"via", "element", "snapshot"}</code></td></tr>
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/type</code></td><td><code>{"selector", "text", "append"?}</code>: Compose SetText/InsertTextAtCursor ou EditText.</td></tr>
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/scroll</code></td><td><code>{"selector", "dx", "dy"}</code> (ScrollBy, RecyclerView, ScrollView) ou <code>{"x", "y", "dx", "dy"}</code> (roda do mouse em Compose).</td></tr>
-<tr><td><span class="method">POST</span> <code>/sessions/{id}/wait</code></td><td><code>{"selector", "timeoutMs"? (10000, até 120000), "gone"?}</code> → <code>{"element", "waitedMs", "activity"}</code></td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/wait</code></td><td><code>{"selector"?, "ready"?, "timeoutMs"? (10000, ou 15000 sem seletor; até 120000), "gone"?}</code> → <code>{"element", "waitedMs", "activity", "ready", "screenReady"}</code>. Precisa de um seletor, de <code>"ready": true</code> ("Tela pronta") ou dos dois. 408 <code>wait-timeout</code> / <code>ready-timeout</code> com <code>details.waitingFor</code>.</td></tr>
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/input</code></td><td>Entrada crua do Worker com ids do snapshot: <code>{"type": "click"|"input"|"check"|"focus"|"press"|"scroll"|"scrollby"|"compose-action"|"pointer", ...}</code>.</td></tr>
 </table>
 
@@ -179,10 +181,20 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/compose-tree</code></td><td>Árvore de semântica Compose (<code>?maxNodes=2000</code>).</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/screen-state</code></td><td>Descrição textual da tela (e se está em branco, com motivos).</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/diagnostic</code></td><td>Relatório: último erro, erros de runtime, lacunas de API, saúde da VM, APIs/classes/bibliotecas ausentes, mocks e overrides ativos.</td></tr>
-<tr><td><span class="method">GET</span> <code>/sessions/{id}/screenshot.png</code></td><td>PNG da tela; <code>?scale=2&amp;systemBars=0</code>. Cabeçalhos <code>X-Image-Size</code> e <code>X-Screenshot-Notes</code>.</td></tr>
-<tr><td><span class="method">GET</span> <code>/sessions/{id}/elements/{key}/screenshot.png</code></td><td>PNG de um elemento pela chave de layout-bounds.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/screenshot.png</code></td><td>PNG da tela; <code>?scale=2&amp;systemBars=0</code>. Cabeçalhos <code>X-Image-Size</code> e <code>X-Screenshot-Notes</code>. <code>?waitReady=1&amp;readyTimeoutMs=15000</code> espera a "Tela pronta" antes de desenhar (408 <code>ready-timeout</code> com os motivos) e responde <code>X-Screen-Ready: {"ready":true,"waitedMs":308,"activity":"..."}</code>.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/elements/{key}/screenshot.png</code></td><td>PNG de um elemento pela chave de layout-bounds (mesmas opções <code>waitReady</code>).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/ready</code></td><td>"Tela pronta" agora (veja abaixo).</td></tr>
 </table>
 <p>O PNG é composto no sidecar com o CanvasKit (Skia) do próprio bundle: os rasters que a VM desenhou (Compose, Canvas, fundos, sombras, parágrafos Skia) ficam onde a página os põe; texto simples de widgets XML que o site desenharia com o DOM é aproximado com a Roboto do bundle e contado em <code>X-Screenshot-Notes</code> (<code>approximatedText</code>).</p>
+
+<h2 id="tela-pronta">Tela pronta</h2>
+<p>Todo snapshot que o Worker publica traz <code>screenReady</code>. A tela fica <strong>pronta</strong> quando a Activity do topo está em <code>onResume</code> com o primeiro quadro desenhado, todo fragment androidx visível está <code>RESUMED</code> e não há quadro pendente (animação, transição, recomposição), passada de layout pendente numa janela anexada, mensagem da thread principal para agora nem troca de rede em andamento (mocks não contam), durante 300 ms seguidos. No fim desse período o Worker acorda e publica um snapshot com a virada, mesmo sem outra entrada. Uma tela que anima para sempre (spinner, cursor piscando de um campo focado) nunca fica pronta; <code>waitingFor</code> diz por quê.</p>
+<pre><code>curl -H "Authorization: Bearer $T" $R/sessions/$S/ready
+{"ready": true, "current": true, "state": "running", "busyWith": null, "activity": "com.exemplo.app.MainActivity", "seq": 5, "snapshotAgeMs": 76,
+ "screenReady": {"ready": true, "activity": "com.exemplo.app.MainActivity", "readySince": 1794231175557, "settledForMs": 348, "quietMs": 300,
+                 "waitingFor": [], "fragments": [{"className": "com.exemplo.app.ListaFragment", "state": 7, "hidden": false, "ready": true}]}}</code></pre>
+<p><code>current</code> diz se o <code>screenReady</code> do último snapshot descreve a tela agora (falso enquanto uma operação roda, antes da primeira tela ou com a VM parada); <code>ready</code> = <code>current</code> e <code>screenReady.ready</code>. Os motivos de <code>waitingFor</code> vêm em português: <code>"a Activity ainda não chegou a onResume"</code>, <code>"o primeiro quadro ainda não foi desenhado"</code>, <code>"um fragment ainda carregando (ListaFragment)"</code>, <code>"quadro pendente (animação, transição ou recomposição)"</code>, <code>"passada de layout pendente"</code>, <code>"mensagens da thread principal para processar"</code>, <code>"uma requisição de rede em andamento"</code>, <code>"tela parada há 120 ms (pronta após 300 ms)"</code>. O resumo de tela das operações (<code>snapshot</code>) também traz <code>screenReady</code>.</p>
+<p>Formas de esperar: <code>POST /wait {"ready": true}</code> (sozinho ou com um seletor), <code>?waitReady=1</code> nas capturas, o evento SSE <code>ready</code> em <code>/events</code> (a cada virada, para <code>true</code> ou <code>false</code>), os passos <code>waitReady</code>, <code>wait</code> com <code>ready</code> e <code>screenshot</code> com <code>waitReady</code> na fila e, nos plugins, <code>lab.waitReady()</code> e <code>lab.on('ready', fn)</code>.</p>
 
 <h2 id="inspecao">Inspeção da VM</h2>
 <table>
@@ -200,7 +212,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/logcat/stream</code></td><td>SSE: um evento <code>log</code> por linha, <code>id</code> = <code>seq</code>; <code>?since=</code> ou <code>Last-Event-ID</code> retoma.</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/network</code></td><td><code>?since=&amp;limit=200</code> → <code>{"requests": [{"seq", "method", "url", "status", "outcome", "mockId", "mockLabel", "mappedUrl", "refusedHost", "durationMs", ...}], ...}</code></td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/network/stream</code></td><td>SSE: evento <code>request</code> por linha (de novo quando completa).</td></tr>
-<tr><td><span class="method">GET</span> <code>/sessions/{id}/events</code></td><td>SSE: <code>session</code> (descrição inicial), <code>snapshot</code>, <code>loaded</code>, <code>runtime-error</code>, <code>permission-request</code>, <code>permission-config</code>, <code>app-data</code>, <code>plugin</code>, <code>crashed</code>, <code>closed</code>.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/events</code></td><td>SSE: <code>session</code> (descrição inicial), <code>snapshot</code> (com <code>ready</code>), <code>ready</code> (cada virada da "Tela pronta": <code>{"seq", "ready", "activity", "readySince", "waitingFor", "fragments", ...}</code>), <code>loaded</code>, <code>runtime-error</code>, <code>permission-request</code>, <code>permission-config</code>, <code>app-data</code>, <code>plugin</code>, <code>crashed</code>, <code>closed</code>.</td></tr>
 </table>
 <p>As linhas do Logcat só saem da VM enquanto alguém escuta (um stream aberto, um plugin que pediu logs, uma leitura paginada em andamento ou <code>"logcat": "always"</code>). Todo stream manda <code>ping</code> a cada 15 s e termina quando a sessão fecha.</p>
 
@@ -219,6 +231,13 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><span class="method">POST</span> <code>/sessions/{id}/plugins/{pid}/stop</code> · <code>/restart</code></td><td>Parar ou reiniciar.</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/plugins/{pid}/blocks/{index}/image</code></td><td>Uma imagem produzida pelo plugin.</td></tr>
 </table>
+<p>O sidecar roda o runtime de plugins do próprio bundle, então a API <code>lab</code> é a do site, inclusive a "Tela pronta":</p>
+<ul>
+  <li><code>screen.ready</code> (no evento <code>'screen'</code> e em <code>await lab.screen()</code>): <code>{ready, activity, readySince, waitingFor, fragments: [{className, state, hidden, ready}]}</code>, ou <code>null</code> sem tela; a virada para pronta conta como mudança de tela;</li>
+  <li><code>lab.on('ready', fn)</code>: <code>fn(screen)</code> cada vez que a tela <em>fica</em> pronta (Activity nova, Recriar/Reabrir, navegação que assenta; também logo ao assinar, se já estiver pronta); <code>lab.off('ready', fn)</code> cancela;</li>
+  <li><code>await lab.waitReady({timeoutMs = 15000})</code>: resolve com a tela quando estiver pronta; rejeita com <code>code: 'timeout'</code> e "A tela não ficou pronta: &lt;motivos&gt;".</li>
+</ul>
+<p>O modelo "Print na tela pronta" (<code>GET /plugin-templates</code>) tira um print da tela inteira cada vez que ela fica pronta.</p>
 
 <h2 id="fila-servico">Fila: serviço</h2>
 <table>
@@ -250,12 +269,14 @@ curl -H "Authorization: Bearer $C" -F apk=@app.apk -F 'job={"priority": 7, "step
 <tr><th>type</th><th>Campos</th><th>Saída / artefato</th></tr>
 <tr><td><code>launch</code></td><td><code>activity</code></td><td>activity, launchMs</td></tr>
 <tr><td><code>intent</code></td><td><code>intent</code> (corpo de /intent)</td><td>deepLink, activity</td></tr>
-<tr><td><code>wait</code></td><td><code>selector</code>, <code>gone</code>, <code>timeoutMs</code></td><td>element, waitedMs</td></tr>
+<tr><td><code>wait</code></td><td><code>selector</code> e/ou <code>ready: true</code>, <code>gone</code>, <code>timeoutMs</code></td><td>element, waitedMs, ready, screenReady</td></tr>
+<tr><td><code>waitReady</code></td><td><code>timeoutMs</code> (padrão 15000)</td><td>waitedMs, activity, ready, screenReady</td></tr>
+<tr><td><code>reload</code></td><td><code>mode</code>: <code>"recreate"</code> (padrão) ou <code>"reopen"</code></td><td>mode, activity, ready</td></tr>
 <tr><td><code>tap</code></td><td><code>selector</code> ou <code>x</code>/<code>y</code>, <code>longPress</code></td><td>via, element</td></tr>
 <tr><td><code>type</code></td><td><code>selector</code>, <code>text</code>, <code>append</code></td><td>via, element</td></tr>
 <tr><td><code>scroll</code></td><td><code>selector</code> ou <code>x</code>/<code>y</code>, <code>dx</code>, <code>dy</code></td><td>via</td></tr>
 <tr><td><code>back</code>, <code>sleep</code></td><td>— , <code>ms</code> (até 60000)</td><td></td></tr>
-<tr><td><code>screenshot</code></td><td><code>scale</code>, <code>systemBars</code>, <code>selector</code> ou <code>key</code> (só o elemento)</td><td><code>&lt;nome&gt;.png</code></td></tr>
+<tr><td><code>screenshot</code></td><td><code>scale</code>, <code>systemBars</code>, <code>selector</code> ou <code>key</code> (só o elemento), <code>waitReady</code> (espera a "Tela pronta"; <code>timeoutMs</code> vale para a espera)</td><td><code>&lt;nome&gt;.png</code> (e <code>ready</code> na saída)</td></tr>
 <tr><td><code>layoutBounds</code></td><td><code>names</code></td><td>count, <code>&lt;nome&gt;.layout-bounds.json</code></td></tr>
 <tr><td><code>snapshot</code>, <code>composeTree</code> (<code>maxNodes</code>), <code>diagnostic</code></td><td></td><td>JSON como artefato</td></tr>
 <tr><td><code>elements</code>, <code>screenState</code>, <code>viewModels</code></td><td><code>selector</code></td><td>na saída</td></tr>

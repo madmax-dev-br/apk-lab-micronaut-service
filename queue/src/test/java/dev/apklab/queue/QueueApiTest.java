@@ -155,6 +155,14 @@ class QueueApiTest implements TestPropertyProvider {
         assertEquals(400, wrongField.status());
         assertTrue(wrongField.json().path("error").path("message").asText().contains("keys not used by this step: text"), wrongField.json()::toString);
         assertEquals(400, submitJob("alice-token-1", "{\"steps\":[{\"type\":\"wait\"}]}").status(), "wait needs a selector");
+        Response waitNothing = submitJob("alice-token-1", "{\"steps\":[{\"type\":\"wait\",\"gone\":true}]}");
+        assertTrue(waitNothing.json().path("error").path("message").asText().contains("needs a selector, ready: true, or both"), waitNothing.json()::toString);
+        Response badMode = submitJob("alice-token-1", "{\"steps\":[{\"type\":\"reload\",\"mode\":\"refresh\"}]}");
+        assertEquals(400, badMode.status());
+        assertTrue(badMode.json().path("error").path("message").asText().contains("recreate"), badMode.json()::toString);
+        Response readyWithSelector = submitJob("alice-token-1", "{\"steps\":[{\"type\":\"waitReady\",\"selector\":{\"text\":\"x\"}}]}");
+        assertTrue(readyWithSelector.json().path("error").path("message").asText().contains("keys not used by this step: selector"), readyWithSelector.json()::toString);
+        assertEquals(400, submitJob("alice-token-1", "{\"steps\":[{\"type\":\"back\",\"waitReady\":true}]}").status(), "waitReady is a screenshot field");
         assertEquals(400, submitJob("alice-token-1", "{\"priority\":12}").status());
         Response badConfig = submitJob("alice-token-1", "{\"config\":{\"endpointMocks\":[{\"url\":\"/x\",\"stauts\":200}]}}");
         assertEquals(400, badConfig.status());

@@ -215,4 +215,97 @@ class RunnerEndToEndTest implements TestPropertyProvider {
         assertTrue(plugin.path("blocks").get(0).toString().contains("ViewModels:"), plugin.toString());
         System.out.printf("[e2e] plugin: status %s, badge %s, %s%n", plugin.path("status").asText(), plugin.path("badge").asText(), plugin.path("blocks").get(0));
     }
+
+    // ---- "Tela pronta" and "Recriar / Reabrir" -----------------------------------------------------------------------------------------------------------------
+    private JsonNode appViewModel(String id) {
+        for (JsonNode model : ok(http.get("/sessions/" + id + "/view-models")).json()) if (!model.path("library").asBoolean()) return model;
+        throw new AssertionError("the app has no ViewModel on the screen");
+    }
+
+    @Test
+    void theScreenTurnsReadyAfterLaunchAndTheReadyEventFires() throws Exception {
+        String id = create("compose-approvals-debug.apk", "{}").path("session").path("id").asText();
+        JsonNode before = ok(http.get("/sessions/" + id + "/ready")).json();
+        assertFalse(before.path("ready").asBoolean(), before.toString());
+        Thread launcher = Thread.ofVirtual().start(() -> {
+            try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+            http.post("/sessions/" + id + "/launch", Map.of());
+        });
+        List<TestHttp.Sse> events = http.readUntil("/sessions/" + id + "/events",
+                received -> received.stream().anyMatch(e -> "ready".equals(e.event()) && e.data().path("ready").asBoolean()), Duration.ofSeconds(30));
+        launcher.join();
+        TestHttp.Sse flip = events.stream().filter(e -> "ready".equals(e.event()) && e.data().path("ready").asBoolean()).findFirst().orElse(null);
+        assertTrue(flip != null, "a ready event reaches the events stream: " + events);
+        assertTrue(flip.data().path("activity").asText().endsWith("MainActivity"), flip.data().toString());
+
+        JsonNode ready = null;
+        for (int i = 0; i < 100; i++) { ready = ok(http.get("/sessions/" + id + "/ready")).json(); if (ready.path("ready").asBoolean()) break; Thread.sleep(100); }
+        assertTrue(ready.path("ready").asBoolean() && ready.path("current").asBoolean(), String.valueOf(ready));
+        assertEquals(0, ready.path("screenReady").path("waitingFor").size());
+
+        JsonNode waited = ok(http.post("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 15000))).json();
+        assertTrue(waited.path("ready").asBoolean());
+        assertTrue(waited.path("element").isNull());
+        JsonNode both = ok(http.post("/sessions/" + id + "/wait", Map.of("ready", true, "selector", Map.of("text", "Pedidos da equipe"), "timeoutMs", 15000))).json();
+        assertEquals("compose", both.path("element").path("kind").asText());
+
+        TestHttp.Response shot = ok(http.get("/sessions/" + id + "/screenshot.png?waitReady=1&readyTimeoutMs=15000"));
+        assertEquals("image/png", shot.header("content-type"));
+        assertArrayEquals(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, java.util.Arrays.copyOf(shot.bytes(), 4));
+        assertEquals("411x914", shot.header("x-image-size"));
+        assertTrue(TestHttp.JSON.readTree(shot.header("x-screen-ready")).path("ready").asBoolean(), shot.header("x-screen-ready"));
+        String key = ok(http.get("/sessions/" + id + "/elements?testTag=new-order")).json().path("elements").path(0).path("key").asText();
+        TestHttp.Response crop = ok(http.get("/sessions/" + id + "/elements/" + java.net.URLEncoder.encode(key, StandardCharsets.UTF_8) + "/screenshot.png?waitReady=1"));
+        assertArrayEquals(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, java.util.Arrays.copyOf(crop.bytes(), 4));
+    }
+
+    @Test
+    void recreateKeepsTheViewModelAndReopenCreatesANewOne() throws Exception {
+        String id = create("compose-approvals-debug.apk", "{\"launch\":true}").path("session").path("id").asText();
+        ok(http.post("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 15000)));
+        JsonNode first = appViewModel(id);
+        JsonNode recreated = ok(http.post("/sessions/" + id + "/reload", Map.of("mode", "recreate"))).json();
+        assertEquals("recreate", recreated.path("mode").asText());
+        assertTrue(recreated.path("snapshot").path("activity").asText().endsWith("MainActivity"));
+        JsonNode kept = appViewModel(id);
+        assertEquals(first.path("handle").asText(), kept.path("handle").asText(), "recreate keeps the retained ViewModel");
+        assertFalse(first.path("owner").path("handle").asText().equals(kept.path("owner").path("handle").asText()), "with a new Activity instance");
+        ok(http.post("/sessions/" + id + "/wait", Map.of("ready", true, "selector", Map.of("text", "Pedidos da equipe"), "timeoutMs", 15000)));
+        JsonNode reopened = ok(http.post("/sessions/" + id + "/reload", Map.of("mode", "reopen"))).json();
+        assertEquals("reopen", reopened.path("mode").asText());
+        JsonNode fresh = appViewModel(id);
+        assertEquals(first.path("className").asText(), fresh.path("className").asText());
+        assertFalse(first.path("handle").asText().equals(fresh.path("handle").asText()), "reopen clears the ViewModelStore");
+        ok(http.post("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 15000)));
+        assertEquals("recreate", ok(http.post("/sessions/" + id + "/reload", Map.of())).json().path("mode").asText(), "recreate is the default");
+        assertEquals(400, http.post("/sessions/" + id + "/reload", Map.of("mode", "refresh")).status());
+    }
+
+    @Test
+    void aPluginThatAwaitsWaitReadyProducesAnImage() throws Exception {
+        String id = create("compose-approvals-debug.apk", "{\"launch\":true}").path("session").path("id").asText();
+        JsonNode template = null;
+        for (JsonNode t : ok(http.get("/plugin-templates")).json()) if ("Print na tela pronta".equals(t.path("name").asText())) template = t;
+        assertTrue(template != null, "the service lists its template");
+        String code = "const tela = await lab.waitReady({ timeoutMs: 15000 });\nlab.ui.text(tela.ready.ready ? 'pronta' : 'não', { id: 'estado' });\nlab.ui.image(await lab.screenshot({ maxWidth: 200 }), { id: 'print', caption: tela.activity });";
+        ok(http.put("/sessions/" + id + "/plugins", Map.of("plugins", List.of(Map.of("id", "espera", "name", "Espera", "code", code), Map.of("id", "modelo", "name", template.path("name").asText(), "code", template.path("code").asText())))));
+        for (String pid : List.of("espera", "modelo")) {
+            JsonNode plugin = null, image = null;
+            for (int i = 0; i < 150 && image == null; i++) {
+                plugin = ok(http.get("/sessions/" + id + "/plugins/" + pid)).json();
+                for (JsonNode block : plugin.path("blocks")) if ("image".equals(block.path("kind").asText())) image = block;
+                if ("erro".equals(plugin.path("status").asText())) break;
+                if (image == null) Thread.sleep(100);
+            }
+            assertTrue(image != null, pid + ": " + plugin);
+            TestHttp.Response png = ok(http.get("/sessions/" + id + "/" + image.path("path").asText()));
+            assertArrayEquals(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, java.util.Arrays.copyOf(png.bytes(), 4));
+            if (pid.equals("espera")) {
+                assertTrue(image.path("caption").asText().endsWith("MainActivity"), image.toString());
+                boolean pronta = false;
+                for (JsonNode block : plugin.path("blocks")) if ("estado".equals(block.path("id").asText())) pronta = "pronta".equals(block.path("text").asText());
+                assertTrue(pronta, plugin.toString());
+            } else assertTrue(image.path("caption").asText().contains("pronta #1"), image.toString());
+        }
+    }
 }

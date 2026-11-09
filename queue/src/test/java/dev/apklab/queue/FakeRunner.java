@@ -27,6 +27,7 @@ public class FakeRunner implements RunnerGateway {
     volatile long stepDelayMs;
     final Set<String> open = ConcurrentHashMap.newKeySet();
     final List<String> calls = new CopyOnWriteArrayList<>();
+    final List<String> bodies = new CopyOnWriteArrayList<>();   // "<method> <path> <JSON body>" of each call()
     final Queue<RunnerError> createFailures = new ConcurrentLinkedQueue<>();
     final Map<String, RunnerError> pathFailures = new ConcurrentHashMap<>();
     final AtomicInteger created = new AtomicInteger();
@@ -74,6 +75,7 @@ public class FakeRunner implements RunnerGateway {
     @Override
     public JsonNode call(String sessionId, String method, String path, JsonNode body, Duration timeout) {
         calls.add(method + " " + path);
+        bodies.add(method + " " + path + " " + (body == null ? "null" : body.toString()));
         if (!open.contains(sessionId)) throw new RunnerError("no session", 404, "not-found", false, false, null);
         RunnerError failure = pathFailures.get(path);
         if (failure != null) throw failure;
@@ -86,6 +88,12 @@ public class FakeRunner implements RunnerGateway {
             case "/tap" -> out.put("via", "semantics").putObject("element").put("key", "c:1:2").put("name", "Button");
             case "/view-models" -> { return JSON.createArrayNode().add(JSON.createObjectNode().put("className", "test.fake.CounterModel").put("handle", "h1")); }
             case "/field" -> out.put("$kind", "MutableState").put("value", 3);
+            case "/reload" -> out.put("mode", body.path("mode").asText()).putObject("snapshot").put("activity", "test.fake.MainActivity").putObject("screenReady").put("ready", false);
+            case "/wait" -> {
+                out.put("waitedMs", 1).put("activity", "test.fake.MainActivity").put("ready", body.path("ready").asBoolean(false));
+                out.putObject("screenReady").put("ready", true).putArray("waitingFor");
+                if (body.has("selector")) out.putObject("element").put("key", "c:1:2"); else out.putNull("element");
+            }
             default -> out.put("ok", true).put("path", path);
         }
         return out;
@@ -94,7 +102,8 @@ public class FakeRunner implements RunnerGateway {
     @Override
     public Bytes bytes(String sessionId, String path, Duration timeout) {
         calls.add("GET " + path);
-        return new Bytes(new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, "image/png", "{\"approximatedText\":0}");
+        return new Bytes(new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, "image/png", "{\"approximatedText\":0}",
+                path.contains("waitReady=1") ? "{\"ready\":true,\"waitedMs\":3,\"activity\":\"test.fake.MainActivity\"}" : null);
     }
 
     @Override

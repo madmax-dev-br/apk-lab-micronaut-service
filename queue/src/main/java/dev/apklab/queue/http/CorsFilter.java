@@ -21,7 +21,7 @@ import java.util.List;
 public class CorsFilter implements Ordered {
     public static final int ORDER = Ordered.HIGHEST_PRECEDENCE + 100;
     public static final String ALLOW_HEADERS = "authorization, content-type, x-apk-config, x-job, x-client-id, last-event-id";
-    public static final String EXPOSE_HEADERS = "x-request-id, retry-after, content-disposition, x-image-size, x-screenshot-notes";
+    public static final String EXPOSE_HEADERS = "x-request-id, retry-after, content-disposition, x-image-size, x-screenshot-notes, x-screen-ready";
     public static final String ALLOW_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 
     private final List<String> origins;

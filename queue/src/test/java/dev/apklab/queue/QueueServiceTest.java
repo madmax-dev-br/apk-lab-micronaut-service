@@ -85,6 +85,27 @@ class QueueServiceTest {
     }
 
     @Test
+    void reloadWaitReadyAndScreenshotWaitReadyReachTheRunner() {
+        FakeRunner runner = new FakeRunner("r1", 1);
+        QueueService queue = service(settings(), new MemoryStore(), runner);
+        List<Step> steps = List.of(Step.of("launch"), Step.builder("reload").mode("reopen").build(), Step.builder("waitReady").timeoutMs(20000).build(),
+                Step.builder("wait").ready(true).selector(Selector.byText("Olá")).build(), Step.builder("screenshot").name("pronta").waitReady(true).build(), Step.of("reload"));
+        QueueItem item = queue.submitJob("alice", APK, job(steps, null), JSON.createObjectNode());
+        await(() -> "succeeded".equals(item.state) || "failed".equals(item.state), "the job");
+        assertEquals("succeeded", item.state, () -> String.valueOf(item.error));
+        assertEquals("reopen", item.result.steps.get(1).output.path("mode").asText());
+        assertFalse(item.result.steps.get(1).output.path("ready").asBoolean(true));
+        assertTrue(item.result.steps.get(2).output.path("ready").asBoolean());
+        assertEquals("c:1:2", item.result.steps.get(3).output.path("element").path("key").asText());
+        assertTrue(item.result.steps.get(4).output.path("ready").path("ready").asBoolean(), item.result.steps.get(4).output::toString);
+        assertEquals("recreate", item.result.steps.get(5).output.path("mode").asText());
+        assertTrue(runner.calls.contains("GET /screenshot.png?scale=1.0&systemBars=1&waitReady=1&readyTimeoutMs=15000"), runner.calls::toString);
+        assertEquals(List.of("POST /reload {\"mode\":\"reopen\"}", "POST /wait {\"ready\":true,\"timeoutMs\":20000}",
+                "POST /wait {\"selector\":{\"text\":\"Olá\"},\"timeoutMs\":10000,\"gone\":false,\"ready\":true}", "POST /reload {\"mode\":\"recreate\"}"),
+                runner.bodies.stream().filter(b -> b.startsWith("POST /reload") || b.startsWith("POST /wait")).toList());
+    }
+
+    @Test
     void runnerCapacityIsRespected() {
         FakeRunner runner = new FakeRunner("r1", 1);
         runner.stepDelayMs = 150;

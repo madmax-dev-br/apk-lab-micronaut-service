@@ -25,18 +25,22 @@ import java.util.StringJoiner;
 /** Declarative job steps: validation (before a job is accepted) and execution against a runner session (the same steps as the Node service). */
 public final class Steps {
     public static final int MAX_STEPS = 200;
+    public static final List<String> RELOAD_MODES = List.of("recreate", "reopen");
+    private static final int READY_TIMEOUT_MS = 15_000;
     private static final List<String> COMMON = List.of("type", "name", "continueOnError", "timeoutMs");
     static final Map<String, List<String>> FIELDS = new LinkedHashMap<>();
     static {
         FIELDS.put("launch", List.of("activity"));
         FIELDS.put("intent", List.of("intent"));
-        FIELDS.put("wait", List.of("selector", "gone"));
+        FIELDS.put("wait", List.of("selector", "gone", "ready"));
+        FIELDS.put("waitReady", List.of());
+        FIELDS.put("reload", List.of("mode"));
         FIELDS.put("tap", List.of("selector", "x", "y", "longPress"));
         FIELDS.put("type", List.of("selector", "text", "append"));
         FIELDS.put("scroll", List.of("selector", "x", "y", "dx", "dy"));
         FIELDS.put("back", List.of());
         FIELDS.put("sleep", List.of("ms"));
-        FIELDS.put("screenshot", List.of("scale", "selector", "key", "systemBars"));
+        FIELDS.put("screenshot", List.of("scale", "selector", "key", "systemBars", "waitReady"));
         FIELDS.put("layoutBounds", List.of("names"));
         FIELDS.put("snapshot", List.of());
         FIELDS.put("elements", List.of("selector"));
@@ -81,7 +85,8 @@ public final class Steps {
             if (step.name() != null && !names.add(step.name())) throw ApiException.badRequest(where + ".name must be unique");
             boolean hasSelector = step.selector() != null && !step.selector().isEmpty();
             switch (step.type()) {
-                case "wait" -> { if (!hasSelector) throw ApiException.badRequest(where + " (wait) needs a selector"); }
+                case "wait" -> { if (!hasSelector && !Boolean.TRUE.equals(step.ready())) throw ApiException.badRequest(where + " (wait) needs a selector, ready: true, or both"); }
+                case "reload" -> { if (step.mode() != null && !RELOAD_MODES.contains(step.mode())) throw ApiException.badRequest(where + " (reload): mode must be \"recreate\" or \"reopen\""); }
                 case "type" -> {
                     if (!hasSelector) throw ApiException.badRequest(where + " (type) needs a selector");
                     if (step.text() == null) throw ApiException.badRequest(where + " (type) needs text");
@@ -121,10 +126,30 @@ public final class Steps {
             }
             case "wait": {
                 ObjectNode body = mapper.createObjectNode();
-                body.set("selector", stepJson.get("selector"));
-                body.put("timeoutMs", step.timeoutMs() == null ? 10_000 : step.timeoutMs());
+                boolean hasSelector = step.selector() != null && !step.selector().isEmpty();
+                if (hasSelector) body.set("selector", stepJson.get("selector"));
+                body.put("timeoutMs", step.timeoutMs() != null ? step.timeoutMs() : hasSelector ? 10_000 : READY_TIMEOUT_MS);
                 body.put("gone", Boolean.TRUE.equals(step.gone()));
+                body.put("ready", Boolean.TRUE.equals(step.ready()));
                 return Outcome.of(runner.call(sessionId, "POST", "/wait", body, timeout));
+            }
+            case "waitReady": {
+                ObjectNode body = mapper.createObjectNode().put("ready", true).put("timeoutMs", step.timeoutMs() == null ? READY_TIMEOUT_MS : step.timeoutMs());
+                JsonNode r = runner.call(sessionId, "POST", "/wait", body, timeout);
+                ObjectNode out = mapper.createObjectNode();
+                out.set("waitedMs", r.get("waitedMs"));
+                out.put("activity", r.path("activity").asText(null));
+                out.set("ready", r.get("ready"));
+                out.set("screenReady", r.get("screenReady"));
+                return Outcome.of(out);
+            }
+            case "reload": {
+                String mode = step.mode() == null ? "recreate" : step.mode();
+                JsonNode r = runner.call(sessionId, "POST", "/reload", mapper.createObjectNode().put("mode", mode), timeout);
+                ObjectNode out = mapper.createObjectNode().put("mode", mode).put("activity", r.path("snapshot").path("activity").asText(null));
+                JsonNode ready = r.path("snapshot").path("screenReady").path("ready");
+                out.set("ready", ready.isMissingNode() ? mapper.nullNode() : ready);
+                return Outcome.of(out);
             }
             case "tap": {
                 JsonNode r = runner.call(sessionId, "POST", "/tap", pick(mapper, stepJson, "selector", "x", "y", "longPress"), timeout);
@@ -148,7 +173,12 @@ public final class Steps {
             }
             case "screenshot": {
                 double scale = step.scale() == null ? 1 : step.scale();
-                String path = "/screenshot.png?scale=" + scale + "&systemBars=" + (Boolean.FALSE.equals(step.systemBars()) ? 0 : 1);
+                // waitReady: the runner waits for "Tela pronta" before painting (and, for a selector, before the element is looked up)
+                int readyTimeoutMs = step.timeoutMs() == null ? READY_TIMEOUT_MS : step.timeoutMs();
+                String ready = Boolean.TRUE.equals(step.waitReady()) ? "&waitReady=1&readyTimeoutMs=" + readyTimeoutMs : "";
+                if (!ready.isEmpty() && step.key() == null && step.selector() != null)
+                    runner.call(sessionId, "POST", "/wait", mapper.createObjectNode().put("ready", true).put("timeoutMs", readyTimeoutMs), timeout);
+                String path = "/screenshot.png?scale=" + scale + "&systemBars=" + (Boolean.FALSE.equals(step.systemBars()) ? 0 : 1) + ready;
                 String key = step.key();
                 if (key == null && step.selector() != null) {
                     JsonNode found = runner.call(sessionId, "GET", "/elements?" + query(step.selector()), null, timeout).path("elements");
@@ -156,12 +186,13 @@ public final class Steps {
                     if (found.size() <= at) throw new ApiException(404, "element-not-found", "screenshot: no element matches " + stepJson.get("selector"));
                     key = found.get(at).path("key").asText();
                 }
-                if (key != null) path = "/elements/" + URLEncoder.encode(key, StandardCharsets.UTF_8) + "/screenshot.png?scale=" + scale;
+                if (key != null) path = "/elements/" + URLEncoder.encode(key, StandardCharsets.UTF_8) + "/screenshot.png?scale=" + scale + ready;
                 RunnerGateway.Bytes shot = runner.bytes(sessionId, path, timeout);
                 String name = label + ".png";
                 ObjectNode out = mapper.createObjectNode().put("artifact", name).put("bytes", shot.bytes().length);
                 if (key != null) out.put("key", key);
                 if (shot.notes() != null) { try { out.set("notes", mapper.readTree(shot.notes())); } catch (java.io.IOException ignored) { /* not JSON */ } }
+                if (shot.ready() != null) { try { out.set("ready", mapper.readTree(shot.ready())); } catch (java.io.IOException ignored) { /* not JSON */ } }
                 return new Outcome(out, List.of(new Artifact(name, "image/png", shot.bytes())));
             }
             case "layoutBounds": {

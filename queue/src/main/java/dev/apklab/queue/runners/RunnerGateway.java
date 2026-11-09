@@ -33,6 +33,9 @@ public interface RunnerGateway {
     /** A raw request to the session API for the lease proxy: the body is streamed back (SSE included). */
     Raw forward(String method, String sessionId, String pathAndQuery, Map<String, String> headers, byte[] body) throws RunnerError;
 
-    record Bytes(byte[] bytes, String type, String notes) {}
+    /** A screenshot: its bytes, content type, X-Screenshot-Notes and (after ?waitReady=1) X-Screen-Ready. */
+    record Bytes(byte[] bytes, String type, String notes, String ready) {
+        public Bytes(byte[] bytes, String type, String notes) { this(bytes, type, notes, null); }
+    }
     record Raw(int status, Map<String, List<String>> headers, InputStream body) {}
 }

@@ -39,6 +39,8 @@
   <a href="#r13">13. Plugin observando um ViewModel</a>
   <a href="#r14">14. Screenshot de um elemento</a>
   <a href="#r15">15. CORS</a>
+  <a href="#r16">16. Recarregar a tela</a>
+  <a href="#r17">17. Tela pronta e print</a>
 </aside>
 <article>
 <h1>Receitas</h1>
@@ -321,9 +323,102 @@ const png = URL.createObjectURL(await (await fetch(`${R}/sessions/${id}/screensh
 <ul>
   <li>O preflight (<code>OPTIONS</code>) é respondido antes da autenticação; uma origem fora da lista recebe <code>403 cors-origin-not-allowed</code>.</li>
   <li>Não há cookies: a autenticação é por token, então <code>Access-Control-Allow-Credentials</code> não é enviado nem necessário.</li>
-  <li>Os cabeçalhos expostos ao navegador: <code>X-Image-Size</code>, <code>X-Screenshot-Notes</code>, <code>Retry-After</code>, <code>Content-Disposition</code>.</li>
+  <li>Os cabeçalhos expostos ao navegador: <code>X-Image-Size</code>, <code>X-Screenshot-Notes</code>, <code>X-Screen-Ready</code>, <code>Retry-After</code>, <code>Content-Disposition</code>.</li>
   <li>Um token no navegador é visível para quem usa a página: dê ao front end um token de cliente da fila (com limite próprio) em vez do token do runner sempre que possível.</li>
 </ul>
+
+<h2 id="r16">16. Recarregar a tela</h2>
+<p>Dois jeitos de recarregar a Activity atual, como os botões "Recriar" e "Reabrir" do site:</p>
+<ul>
+  <li><strong><code>recreate</code></strong> (padrão): <code>Activity.recreate()</code>, o que o Android faz numa rotação ou troca de tema. Estado salvo e ViewModels retidos ficam. Use para testar se a tela sobrevive a uma mudança de configuração (o texto digitado volta? a lista não é buscada de novo?).</li>
+  <li><strong><code>reopen</code></strong>: uma instância nova com o mesmo Intent no lugar da atual, sem estado salvo e com o <code>ViewModelStore</code> limpo; o conteúdo carrega de novo. Use para buscar os dados outra vez depois de trocar um mock (<code>PATCH /config</code>) ou para voltar a tela ao estado inicial sem reiniciar o app (<code>/restart</code> recarrega o APK inteiro).</li>
+</ul>
+<pre><code>curl -s -H "Authorization: Bearer $T" $R/sessions/$S/view-models | jq '.[] | select(.library | not) | .handle'      # "h6755.…"
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"mode": "recreate"}' $R/sessions/$S/reload | jq '{mode, activity: .snapshot.activity}'
+curl -s -H "Authorization: Bearer $T" $R/sessions/$S/view-models | jq '.[] | select(.library | not) | .handle'      # o mesmo handle: ViewModel mantido
+# troca o mock e carrega de novo numa instância nova
+curl -s -X PATCH -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"endpointMocks": [{"method": "GET", "url": "/v1/pedidos", "body": "[]"}]}' $R/sessions/$S/config &gt; /dev/null
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"mode": "reopen"}' $R/sessions/$S/reload &gt; /dev/null
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"ready": true}' $R/sessions/$S/wait | jq '{ready, waitedMs}'</code></pre>
+<span class="lang">Java</span>
+<pre><code>String appViewModel(String id) {
+    for (JsonNode vm : http.retrieve(HttpRequest.GET("/sessions/" + id + "/view-models").bearerAuth(token), JsonNode.class))
+        if (!vm.path("library").asBoolean()) return vm.path("handle").asText();
+    return null;
+}
+String antes = appViewModel(id);
+http.retrieve(HttpRequest.POST("/sessions/" + id + "/reload", Map.of("mode", "recreate")).bearerAuth(token), JsonNode.class);
+System.out.println(antes.equals(appViewModel(id)));      // true: o ViewModel retido sobreviveu
+http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config", Map.of("endpointMocks", List.of(Map.of("method", "GET", "url", "/v1/pedidos", "body", "[]")))).bearerAuth(token), JsonNode.class);
+http.retrieve(HttpRequest.POST("/sessions/" + id + "/reload", Map.of("mode", "reopen")).bearerAuth(token), JsonNode.class);
+System.out.println(antes.equals(appViewModel(id)));      // false: instância nova, ViewModelStore limpo
+http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true)).bearerAuth(token), JsonNode.class);</code></pre>
+<p>Na fila: <code>{"type": "reload", "mode": "reopen"}</code>. Depois de recarregar, a tela volta a "não pronta" até assentar: espere com <code>waitReady</code> antes de capturar.</p>
+
+<h2 id="r17">17. Esperar a tela ficar pronta e tirar o print</h2>
+<p>Cria a sessão com um mock, inicia, espera a "Tela pronta" (o mock responde sem rede, então a tela assenta assim que o conteúdo é desenhado) e captura. Logo abaixo, o mesmo como job na fila.</p>
+<pre><code>S=$(curl -s -H "Authorization: Bearer $T" -F apk=@app.apk -F 'config={
+  "endpointMocks": [{"method": "GET", "url": "/v1/perfil", "status": 200,
+                     "headers": [{"name": "Content-Type", "value": "application/json"}], "body": "{\"nome\": \"Ana\"}"}]
+}' $R/sessions | jq -r .session.id)
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{}' $R/sessions/$S/launch &gt; /dev/null
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"ready": true, "timeoutMs": 15000}' $R/sessions/$S/wait | jq '{ready, waitedMs}'
+# 408 {"error": {"code": "ready-timeout", "details": {"waitingFor": ["quadro pendente (animação, transição ou recomposição)"]}}} se não assentar
+curl -s -H "Authorization: Bearer $T" $R/sessions/$S/ready | jq '{ready, current, waitingFor: .screenReady.waitingFor}'
+curl -s -H "Authorization: Bearer $T" -D - -o pronta.png "$R/sessions/$S/screenshot.png?waitReady=1&amp;readyTimeoutMs=15000" | grep -i x-screen-ready
+# acompanhe as viradas: event: ready / data: {"ready": true, "activity": "...", ...}
+curl -sN -H "Authorization: Bearer $T" $R/sessions/$S/events</code></pre>
+<span class="lang">Java</span>
+<pre><code>import io.micronaut.http.client.exceptions.HttpClientResponseException;
+
+String id = criar("""
+    {"endpointMocks": [{"method": "GET", "url": "/v1/perfil", "status": 200,
+                        "headers": [{"name": "Content-Type", "value": "application/json"}], "body": "{\\"nome\\": \\"Ana\\"}"}]}""");
+http.retrieve(HttpRequest.POST("/sessions/" + id + "/launch", Map.of()).bearerAuth(token), JsonNode.class);
+try {
+    JsonNode pronta = http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 15000)).bearerAuth(token), JsonNode.class);
+    System.out.println("pronta em " + pronta.path("waitedMs").asLong() + " ms");
+} catch (HttpClientResponseException e) {   // 408 ready-timeout: details.waitingFor diz o que falta
+    System.out.println("ainda esperando: " + e.getResponse().getBody(JsonNode.class).map(b -> b.path("error").path("details").path("waitingFor")).orElse(null));
+    throw e;
+}
+byte[] png = http.retrieve(HttpRequest.GET("/sessions/" + id + "/screenshot.png?waitReady=1").bearerAuth(token), byte[].class);
+Files.write(Path.of("pronta.png"), png);</code></pre>
+<p>Como job na fila:</p>
+<pre><code>curl -s -H "Authorization: Bearer $C" -F apk=@app.apk -F 'job={
+  "config": {"endpointMocks": [{"method": "GET", "url": "/v1/perfil", "body": "{\"nome\": \"Ana\"}"}]},
+  "steps": [
+    {"type": "launch"},
+    {"type": "waitReady", "timeoutMs": 15000},
+    {"type": "screenshot", "name": "pronta", "waitReady": true},
+    {"type": "reload", "mode": "reopen"},
+    {"type": "wait", "ready": true, "selector": {"textContains": "Ana"}},
+    {"type": "screenshot", "name": "reaberta", "waitReady": true}
+  ]}' $Q/jobs | tee job.json
+J=$(jq -r .id job.json)
+curl -sN -H "Authorization: Bearer $C" $Q/jobs/$J/events          # termina com event: succeeded
+curl -s -H "Authorization: Bearer $C" -o pronta.png $Q/jobs/$J/artifacts/pronta.png</code></pre>
+<span class="lang">Java</span>
+<pre><code>BlockingHttpClient fila = HttpClient.create(new URL("http://127.0.0.1:8080")).toBlocking();
+String cliente = System.getenv("QUEUE_TOKEN");
+String job = """
+    {"config": {"endpointMocks": [{"method": "GET", "url": "/v1/perfil", "body": "{\\"nome\\": \\"Ana\\"}"}]},
+     "steps": [{"type": "launch"}, {"type": "waitReady", "timeoutMs": 15000}, {"type": "screenshot", "name": "pronta", "waitReady": true},
+               {"type": "reload", "mode": "reopen"}, {"type": "wait", "ready": true, "selector": {"textContains": "Ana"}},
+               {"type": "screenshot", "name": "reaberta", "waitReady": true}]}""";
+MultipartBody body = MultipartBody.builder()
+        .addPart("apk", "app.apk", MediaType.of("application/vnd.android.package-archive"), apk)
+        .addPart("job", job)
+        .build();
+String jobId = fila.retrieve(HttpRequest.POST("/jobs", body).contentType(MediaType.MULTIPART_FORM_DATA_TYPE).bearerAuth(cliente), JsonNode.class).path("id").asText();
+JsonNode resultado;
+do {
+    Thread.sleep(500);
+    resultado = fila.retrieve(HttpRequest.GET("/jobs/" + jobId).bearerAuth(cliente), JsonNode.class);
+} while (!List.of("succeeded", "failed", "cancelled").contains(resultado.path("state").asText()));
+byte[] print = fila.retrieve(HttpRequest.GET("/jobs/" + jobId + "/artifacts/pronta.png").bearerAuth(cliente), byte[].class);</code></pre>
+<p>Num plugin (exige <code>RUNNER_ALLOW_PLUGINS=true</code>): <code>const tela = await lab.waitReady(); lab.ui.image(await lab.screenshot(), {caption: tela.activity});</code>, ou o modelo "Print na tela pronta", que usa <code>lab.on('ready', ...)</code>.</p>
+<p class="note">Os dois fluxos (recriar mantém o ViewModel e reabrir cria outro; tela pronta, espera e print, também como job) são testes do repositório (<code>CookbookClientTest</code>, <code>RunnerEndToEndTest</code>, <code>QueueEndToEndTest</code>), rodados com APKs de sonda sintéticos.</p>
 </article>
 </main>
 <footer><div>APK Lab Micronaut Service · <a href="api.html">Referência da API</a> · <a href="seguranca.html">Segurança e limites</a></div></footer>

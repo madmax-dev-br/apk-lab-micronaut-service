@@ -47,6 +47,7 @@ import java.util.List;
 @Validated
 @ExecuteOn(TaskExecutors.BLOCKING)
 public class SessionsController {
+    private static final int READY_TIMEOUT_MS = 15000, MAX_WAIT_MS = 120000;
     private static final List<String> INPUT_TYPES = List.of("click", "input", "check", "focus", "press", "scroll", "scrollby", "compose-action", "pointer");
 
     private final SessionManager sessions;
@@ -136,6 +137,12 @@ public class SessionsController {
     @Post("/{id}/back")
     public JsonNode back(@PathVariable String id) { return call(id, "back", null); }
 
+    /** "Recriar" ({ "mode": "recreate" }, the default: Activity.recreate(), saved state and retained ViewModels kept) or "Reabrir" ({ "mode": "reopen" }: a fresh instance). */
+    @Post("/{id}/reload")
+    public JsonNode reload(@PathVariable String id, @Nullable @Valid @Body Requests.Reload body) {
+        return sessions.get(id).call("reload", mapper.createObjectNode().put("mode", body == null || body.mode() == null ? "recreate" : body.mode()));
+    }
+
     @Post("/{id}/tap")
     public JsonNode tap(@PathVariable String id, @Valid @Body Requests.Tap body) {
         if (body.selector() == null && body.key() == null && (body.x() == null || body.y() == null)) throw ApiException.badRequest("tap needs { x, y } (screen dp) or { selector } / { key }");
@@ -158,12 +165,18 @@ public class SessionsController {
         return sessions.get(id).call("input", body);
     }
 
+    /** An element (selector / key), "Tela pronta" (ready: true) or both; 408 wait-timeout / ready-timeout with details.waitingFor. */
     @Post("/{id}/wait")
     public JsonNode waitFor(@PathVariable String id, @Valid @Body Requests.Wait body) {
-        if (body.selector() == null && body.key() == null) throw ApiException.badRequest("wait needs a selector");
-        int timeoutMs = body.timeoutMs() == null ? 10000 : body.timeoutMs();
+        boolean hasSelector = body.selector() != null || body.key() != null;
+        if (!hasSelector && !Boolean.TRUE.equals(body.ready())) throw ApiException.badRequest("wait needs a selector, ready: true, or both");
+        int timeoutMs = body.timeoutMs() != null ? body.timeoutMs() : hasSelector ? 10000 : READY_TIMEOUT_MS;
         return sessions.get(id).call("wait", mapper.valueToTree(body), java.time.Duration.ofMillis(timeoutMs + 30_000L));
     }
+
+    /** "Tela pronta": the screenReady of the latest snapshot ({ ready, activity, readySince, waitingFor, fragments, ... }) and whether it is current. */
+    @Get("/{id}/ready")
+    public JsonNode ready(@PathVariable String id) { return call(id, "ready", null); }
 
     // ---- reading the screen ------------------------------------------------------------------------------------------------------------------------------------
     @Get("/{id}/snapshot")
@@ -209,17 +222,28 @@ public class SessionsController {
     public JsonNode diagnostic(@PathVariable String id) { return call(id, "diagnostic", null); }
 
     /** PNG of the current screen, composed with the bundle's Skia (CanvasKit): VM rasters as the page draws them, plain widget text approximated (x-screenshot-notes). */
+    /** ?waitReady=1 waits for "Tela pronta" first (readyTimeoutMs, 15 s by default; 408 ready-timeout with the reasons) and adds the X-Screen-Ready header. */
     @Get(value = "/{id}/screenshot.png", produces = "image/png")
-    public MutableHttpResponse<byte[]> screenshot(@PathVariable String id, @Nullable @QueryValue Double scale, @Nullable @QueryValue String systemBars) {
+    public MutableHttpResponse<byte[]> screenshot(@PathVariable String id, @Nullable @QueryValue Double scale, @Nullable @QueryValue String systemBars,
+                                                  @Nullable @QueryValue String waitReady, @Nullable @QueryValue Integer readyTimeoutMs) {
         ObjectNode args = mapper.createObjectNode().put("scale", scale == null ? 1 : scale).put("systemBars", truthy(systemBars, true));
-        return png(sessions.get(id).call("screenshot", args));
+        return png(callWithReady(id, "screenshot", args, waitReady, readyTimeoutMs));
     }
 
-    /** PNG of one element, by its layout-bounds key (GET /sessions/{id}/layout-bounds lists the keys). */
+    /** PNG of one element, by its layout-bounds key (GET /sessions/{id}/layout-bounds lists the keys); same waitReady options. */
     @Get(value = "/{id}/elements/{key}/screenshot.png", produces = "image/png")
-    public MutableHttpResponse<byte[]> elementScreenshot(@PathVariable String id, @PathVariable String key, @Nullable @QueryValue Double scale) {
+    public MutableHttpResponse<byte[]> elementScreenshot(@PathVariable String id, @PathVariable String key, @Nullable @QueryValue Double scale,
+                                                         @Nullable @QueryValue String waitReady, @Nullable @QueryValue Integer readyTimeoutMs) {
         ObjectNode args = mapper.createObjectNode().put("key", key).put("scale", scale == null ? 1 : scale);
-        return png(sessions.get(id).call("elementScreenshot", args));
+        return png(callWithReady(id, "elementScreenshot", args, waitReady, readyTimeoutMs));
+    }
+
+    private JsonNode callWithReady(String id, String op, ObjectNode args, @Nullable String waitReady, @Nullable Integer readyTimeoutMs) {
+        RunnerSession session = sessions.get(id);
+        if (!truthy(waitReady, false)) return session.call(op, args);
+        int timeout = readyTimeoutMs == null ? READY_TIMEOUT_MS : Math.max(0, Math.min(MAX_WAIT_MS, readyTimeoutMs));
+        args.put("waitReady", true).put("readyTimeoutMs", timeout);
+        return session.call(op, args, java.time.Duration.ofMillis(timeout + 45_000L));
     }
 
     private MutableHttpResponse<byte[]> png(JsonNode shot) {
@@ -228,6 +252,7 @@ public class SessionsController {
                 .header("X-Image-Size", shot.path("width").asInt() + "x" + shot.path("height").asInt())
                 .header("Cache-Control", "no-store");
         if (shot.has("notes")) response.header("X-Screenshot-Notes", shot.get("notes").toString());
+        if (shot.has("ready")) response.header("X-Screen-Ready", shot.get("ready").toString());
         return response;
     }
 
@@ -291,7 +316,7 @@ public class SessionsController {
         return Streams.of(session, RunnerSession.Channel.NETLOG, mapper, initial, Streams::netRows);
     }
 
-    /** Session events: snapshot, loaded, runtime-error, permission-request, permission-config, app-data, plugin, crashed, closed. The first event describes the session. */
+    /** Session events: snapshot, ready (each "Tela pronta" flip), loaded, runtime-error, permission-request, permission-config, app-data, plugin, crashed, closed. The first event describes the session. */
     @Get(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM)
     public Flux<Event<JsonNode>> events(@PathVariable String id) {
         RunnerSession session = sessions.get(id);

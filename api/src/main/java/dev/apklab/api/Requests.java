@@ -41,10 +41,19 @@ public final class Requests {
     public record Scroll(@Nullable @Valid Selector selector, @Nullable @Size(max = 200) String key, @Nullable Double x, @Nullable Double y,
                          @Nullable @DecimalMin("-100000") @DecimalMax("100000") Double dx, @Nullable @DecimalMin("-100000") @DecimalMax("100000") Double dy) {}
 
-    /** Waits until an element matching the selector is on the screen (or gone). */
+    /**
+     * Waits until an element matching the selector is on the screen (or gone) and, with ready = true, the screen is "Tela pronta" (snapshot.screenReady.ready);
+     * either condition alone works. Without a selector the default timeout is 15 s.
+     */
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Wait(@Nullable @Valid Selector selector, @Nullable @Size(max = 200) String key, @Nullable @Min(0) @Max(120000) Integer timeoutMs, @Nullable Boolean gone) {}
+    public record Wait(@Nullable @Valid Selector selector, @Nullable @Size(max = 200) String key, @Nullable @Min(0) @Max(120000) Integer timeoutMs, @Nullable Boolean gone,
+                       @Nullable Boolean ready) {}
+
+    /** "Recriar" (recreate, the default: Activity.recreate(), saved state and retained ViewModels kept) or "Reabrir" (reopen: a fresh instance with the same Intent). */
+    @Introspected
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Reload(@Nullable @Pattern(regexp = "recreate|reopen", message = "mode must be \"recreate\" or \"reopen\"") String mode) {}
 
     /** An Intent for startActivity: a deep link is { action: "android.intent.action.VIEW", data: "https://..." }. */
     @Introspected

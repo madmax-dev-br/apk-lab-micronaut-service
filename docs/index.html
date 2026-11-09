@@ -40,8 +40,8 @@
 
 <h2 id="o-que-e">O que é</h2>
 <div class="cards">
-  <div class="card"><h3>Runner</h3><p>Sessões de APK com toda a configuração dos Controles: aparelho, rede (lista de hosts, redirecionamento, offline, proxy), permissões e localização, overrides de método, Activities ignoradas, mocks de endpoint, limites de evento e memória. Toque, digitação, intents, screenshots PNG, limites de layout, árvore Compose, ViewModels, Logcat e rede por SSE, plugins e diagnóstico.</p></div>
-  <div class="card"><h3>Fila</h3><p>Jobs declarativos (passos: iniciar, esperar texto/testTag, tocar, digitar, screenshot, limites de layout, campo de ViewModel, Logcat, rede, plugins) e leases interativos com proxy da API do runner. Prioridades, justiça entre clientes, capacidade lida do health dos runners, retentativas, cancelamento, progresso por SSE e retenção.</p></div>
+  <div class="card"><h3>Runner</h3><p>Sessões de APK com toda a configuração dos Controles: aparelho, rede (lista de hosts, redirecionamento, offline, proxy), permissões e localização, overrides de método, Activities ignoradas, mocks de endpoint, limites de evento e memória. Toque, digitação, intents, <strong>Recriar / Reabrir</strong> a Activity, a <strong>Tela pronta</strong> (espera, evento SSE e captura só quando a tela assentou), screenshots PNG, limites de layout, árvore Compose, ViewModels, Logcat e rede por SSE, plugins e diagnóstico.</p></div>
+  <div class="card"><h3>Fila</h3><p>Jobs declarativos (passos: iniciar, esperar texto/testTag ou a tela pronta, recarregar a tela, tocar, digitar, screenshot, limites de layout, campo de ViewModel, Logcat, rede, plugins) e leases interativos com proxy da API do runner. Prioridades, justiça entre clientes, capacidade lida do health dos runners, retentativas, cancelamento, progresso por SSE e retenção.</p></div>
   <div class="card"><h3>Mesma API do serviço Node</h3><p>Os caminhos e corpos JSON são os do <a href="https://github.com/madmax-dev-br/apk-lab-node-service">apk-lab-node-service</a>: um cliente escrito para um funciona no outro, e a fila de um pode usar runners do outro.</p></div>
 </div>
 
@@ -80,7 +80,7 @@
 {"id": 7, "op": "tap", "args": {"selector": {"testTag": "salvar"}}}
 
 # sidecar -> runner (stdout)
-{"event": "ready", "protocol": 1, "revision": "93d82df0437e", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
+{"event": "ready", "protocol": 1, "revision": "c6940189447d", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
 {"id": 7, "ok": true, "result": {"via": "semantics", "element": {...}, "snapshot": {...}}}
 {"id": 8, "ok": false, "error": {"status": 404, "code": "element-not-found", "message": "...", "details": {"activity": "..."}}}
 {"event": "logcat", "data": [{"seq": 41, "level": "W", "tag": "APKWebLab", "message": "..."}]}       # só com assinatura
@@ -116,7 +116,7 @@ export RUNNER_TOKEN=$(openssl rand -hex 24)
 export QUEUE_CLIENTS="eu:$(openssl rand -hex 16)" QUEUE_RUNNERS="http://127.0.0.1:8081" QUEUE_RUNNER_TOKEN=$RUNNER_TOKEN
 ./gradlew :queue:run              # http://127.0.0.1:8080</code></pre>
 <pre><code>curl -s http://127.0.0.1:8081/health
-# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"93d82df0437e","maxSessions":2,"available":2,...}</code></pre>
+# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"c6940189447d","maxSessions":2,"available":2,...}</code></pre>
 <p>O runtime vem do repositório público do site, <strong>no commit fixado</strong> em <code>sidecar/runtime.lock.json</code> (revisão do <code>build-info.json</code>, lista de arquivos, tamanho e SHA-256). Uma publicação nova do site não muda o que este repositório roda. Para usar outra cópia do runtime (por exemplo, um <code>dist/</code> que você construiu), aponte <code>APK_LAB_RUNTIME_DIR</code> para ela. <code>node sidecar/fetch-runtime.mjs --check</code> confere uma cópia existente; <code>--base &lt;url&gt;</code> baixa de um espelho (os hashes continuam valendo).</p>
 
 <h2 id="docker">Docker Compose</h2>

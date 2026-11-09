@@ -132,6 +132,33 @@ class QueueEndToEndTest implements TestPropertyProvider {
     }
 
     @Test
+    void aQueuedJobWithReloadWaitReadyAndAReadyScreenshot() throws Exception {
+        String job = """
+                {"steps": [
+                   {"type": "launch"},
+                   {"type": "waitReady"},
+                   {"type": "reload", "mode": "recreate"},
+                   {"type": "waitReady", "timeoutMs": 20000},
+                   {"type": "reload", "mode": "reopen"},
+                   {"type": "wait", "ready": true, "selector": {"text": "Pedidos da equipe"}},
+                   {"type": "screenshot", "name": "pronta", "waitReady": true}
+                 ]}""";
+        HttpResponse<byte[]> submitted = send("POST", "/jobs", "application/vnd.android.package-archive", apk("compose-approvals-debug.apk"), Map.of("X-Job", JSON.readTree(job).toString()));
+        assertEquals(202, submitted.statusCode(), new String(submitted.body()));
+        String id = json(submitted).path("id").asText();
+        send("GET", "/jobs/" + id + "/events", null, null, Map.of());   // the SSE stream ends with the job
+        JsonNode result = json(send("GET", "/jobs/" + id, null, null, Map.of()));
+        assertEquals("succeeded", result.path("state").asText(), result.toPrettyString());
+        JsonNode steps = result.path("result").path("steps");
+        assertTrue(steps.get(1).path("output").path("ready").asBoolean(), steps.get(1).toString());
+        assertEquals("recreate", steps.get(2).path("output").path("mode").asText());
+        assertEquals("reopen", steps.get(4).path("output").path("mode").asText());
+        assertTrue(steps.get(5).path("output").path("ready").asBoolean(), steps.get(5).toString());
+        assertTrue(steps.get(6).path("output").path("ready").path("ready").asBoolean(), steps.get(6).toString());
+        assertArrayEquals(PNG, java.util.Arrays.copyOf(send("GET", "/jobs/" + id + "/artifacts/pronta.png", null, null, Map.of()).body(), 8));
+    }
+
+    @Test
     void anInteractiveLeaseProxiesTheSession() throws Exception {
         HttpResponse<byte[]> created = send("POST", "/leases", "application/vnd.android.package-archive", apk("net-probe.apk"),
                 Map.of("X-Job", "{\"durationSeconds\":120,\"config\":{\"launch\":true,\"endpointMocks\":[{\"url\":\"/net-probe/hello.json\",\"body\":\"via lease\"}]}}"));

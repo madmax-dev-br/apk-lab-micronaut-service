@@ -18,12 +18,18 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Recipe 1 of the documentation, exactly as published (Micronaut HttpClient): a session created with an endpoint mock, launched, the mock in the network log. */
+/**
+ * Recipes of the documentation, as published (Micronaut HttpClient): 1 (a session created with an endpoint mock, the mock in the network log), 16 (recreate keeps the
+ * ViewModel, reopen creates a new one) and 17 (wait for "Tela pronta" and take the screenshot).
+ */
 @MicronautTest(environments = "e2e")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @EnabledIfEnvironmentVariable(named = "APK_LAB_RUNTIME_DIR", matches = ".+")
@@ -72,6 +78,70 @@ class CookbookClientTest implements TestPropertyProvider {
             assertEquals(200, row.path("status").asInt());
             assertEquals("perfil", row.path("mockLabel").asText());
             assertFalse(row.path("mockId").isNull());
+        }
+    }
+
+    private String criar(BlockingHttpClient http, String token, byte[] apk, String config) {
+        MultipartBody body = MultipartBody.builder()
+                .addPart("apk", "app.apk", MediaType.of("application/vnd.android.package-archive"), apk)
+                .addPart("config", config)
+                .build();
+        JsonNode created = http.retrieve(HttpRequest.POST("/sessions", body).contentType(MediaType.MULTIPART_FORM_DATA_TYPE).bearerAuth(token), JsonNode.class);
+        return created.path("session").path("id").asText();
+    }
+
+    private static String appViewModel(BlockingHttpClient http, String token, String id) {
+        for (JsonNode vm : http.retrieve(HttpRequest.GET("/sessions/" + id + "/view-models").bearerAuth(token), JsonNode.class))
+            if (!vm.path("library").asBoolean()) return vm.path("handle").asText();
+        return null;
+    }
+
+    @Test
+    void recipeSixteenRecreateAndReopen() throws Exception {
+        String token = "cookbook-token";
+        byte[] apk = Files.readAllBytes(Path.of(System.getenv("APK_LAB_TEST_APK_DIR")).resolve("compose-approvals-debug.apk"));
+        try (HttpClient client = HttpClient.create(server.getURL())) {
+            BlockingHttpClient http = client.toBlocking();
+            String id = criar(http, token, apk, "{\"launch\": true}");
+            http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true)).bearerAuth(token), JsonNode.class);
+            // ---- begin: code of the cookbook (recipe 16) ----
+            String antes = appViewModel(http, token, id);
+            http.retrieve(HttpRequest.POST("/sessions/" + id + "/reload", Map.of("mode", "recreate")).bearerAuth(token), JsonNode.class);
+            boolean mantido = antes.equals(appViewModel(http, token, id));
+            http.retrieve(HttpRequest.PATCH("/sessions/" + id + "/config", Map.of("endpointMocks", List.of(Map.of("method", "GET", "url", "/v1/pedidos", "body", "[]")))).bearerAuth(token), JsonNode.class);
+            http.retrieve(HttpRequest.POST("/sessions/" + id + "/reload", Map.of("mode", "reopen")).bearerAuth(token), JsonNode.class);
+            boolean outro = !antes.equals(appViewModel(http, token, id));
+            JsonNode pronta = http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true)).bearerAuth(token), JsonNode.class);
+            // ---- end ----
+            assertTrue(mantido, "recreate keeps the retained ViewModel");
+            assertTrue(outro, "reopen creates a new one");
+            assertTrue(pronta.path("ready").asBoolean());
+        }
+    }
+
+    @Test
+    void recipeSeventeenWaitForTheReadyScreenAndTakeTheScreenshot() throws Exception {
+        String token = "cookbook-token";
+        byte[] apk = Files.readAllBytes(Path.of(System.getenv("APK_LAB_TEST_APK_DIR")).resolve("net-probe.apk"));
+        // the documented recipe mocks /v1/perfil; the probe APK asks for /net-probe/hello.json
+        try (HttpClient client = HttpClient.create(server.getURL())) {
+            BlockingHttpClient http = client.toBlocking();
+            // ---- begin: code of the cookbook (recipe 17) ----
+            String id = criar(http, token, apk, """
+                {"endpointMocks": [{"method": "GET", "url": "/net-probe/hello.json", "status": 200,
+                                    "headers": [{"name": "Content-Type", "value": "application/json"}], "body": "{\\"nome\\": \\"Ana\\"}"}]}""");
+            http.retrieve(HttpRequest.POST("/sessions/" + id + "/launch", Map.of()).bearerAuth(token), JsonNode.class);
+            JsonNode pronta = http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 15000)).bearerAuth(token), JsonNode.class);
+            System.out.println("pronta em " + pronta.path("waitedMs").asLong() + " ms");
+            byte[] png = http.retrieve(HttpRequest.GET("/sessions/" + id + "/screenshot.png?waitReady=1").bearerAuth(token), byte[].class);
+            // ---- end ----
+            assertTrue(pronta.path("ready").asBoolean(), pronta.toString());
+            assertArrayEquals(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, java.util.Arrays.copyOf(png, 4));
+            JsonNode ready = http.retrieve(HttpRequest.GET("/sessions/" + id + "/ready").bearerAuth(token), JsonNode.class);
+            assertTrue(ready.path("ready").asBoolean() && ready.path("current").asBoolean(), ready.toString());
+            http.retrieve(HttpRequest.POST("/sessions/" + id + "/tap", Map.of("selector", Map.of("text", "Load"))).bearerAuth(token), JsonNode.class);
+            JsonNode both = http.retrieve(HttpRequest.POST("/sessions/" + id + "/wait", Map.of("ready", true, "selector", Map.of("textContains", "Ana"), "timeoutMs", 15000)).bearerAuth(token), JsonNode.class);
+            assertTrue(both.path("ready").asBoolean() && both.path("element").isObject(), both.toString());
         }
     }
 }

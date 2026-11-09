@@ -3,6 +3,7 @@
 import { HttpError, badRequest } from './errors.mjs';
 import { validateConfig } from './config.mjs';
 import { Session, publicSnapshot, inventorySummary } from './session.mjs';
+import { reloadModeFrom, readyFlagFrom, screenReadyOut, READY_TIMEOUT_MS, MAX_WAIT_MS, SERVICE_PLUGIN_TEMPLATES } from './readiness.mjs';
 
 const SELECTOR_KEYS = ['key', 'testTag', 'text', 'textContains', 'contentDescription', 'androidId', 'viewId', 'kind', 'clickable', 'index'];
 const INPUT_TYPES = ['click', 'input', 'check', 'focus', 'press', 'scroll', 'scrollby', 'compose-action', 'pointer'];
@@ -33,10 +34,13 @@ export function summary(session) {
   const views = session.bundle.flattenViews(s).filter(v => v.bounds).map(v => ({ id: v.id, parentId: v.parentId, depth: v.depth, type: v.type, kind: v.kind, text: v.text, contentDescription: v.contentDescription, androidId: v.androidId, visible: v.visible, clickable: v.clickable, compose: v.compose, bounds: v.bounds, window: v.window }));
   return { seq: session.snapshotSeq, activity: s.activityName ?? null, closed: !!s.closed, canGoBack: !!s.canGoBack, navigation: s.navigation ?? null, systemBars: s.systemBars ?? null, contentOffset: offset,
     views, composeSemantics: s.composeSemantics ?? null, deepLink: s.deepLink ?? null, droppedEvent: s.droppedEvent ?? null, droppedComposeAction: s.droppedComposeAction ?? null,
-    pendingEventDelay: s.pendingEventDelay ?? null, vmHealth: s.vmHealth ? { liveObjects: s.vmHealth.liveObjects, limit: s.vmHealth.limit, collections: s.vmHealth.collections, oomCount: s.vmHealth.oomCount, lastEventMs: s.vmHealth.lastEventMs } : null,
+    pendingEventDelay: s.pendingEventDelay ?? null, screenReady: screenReadyOut(s), vmHealth: s.vmHealth ? { liveObjects: s.vmHealth.liveObjects, limit: s.vmHealth.limit, collections: s.vmHealth.collections, oomCount: s.vmHealth.oomCount, lastEventMs: s.vmHealth.lastEventMs } : null,
     debugging: { methodOverrides: s.methodOverrides ?? [], endpointMocks: s.endpointMocks ?? [], hostMap: s.hostMap ?? [], ignoredActivities: s.ignoredActivities ?? [] } };
 }
-const png = shot => ({ pngBase64: shot.png.toString('base64'), width: shot.width, height: shot.height, notes: shot.notes, ...(shot.element ? { element: shot.element } : {}) });
+const png = shot => ({ pngBase64: shot.png.toString('base64'), width: shot.width, height: shot.height, notes: shot.notes, ...(shot.element ? { element: shot.element } : {}),
+  ...(shot.ready ? { ready: { ready: !!shot.ready.screenReady?.ready, waitedMs: shot.ready.waitedMs, activity: shot.ready.screenReady?.activity ?? null } } : {}) });
+/** waitReady / readyTimeoutMs of a screenshot operation. */
+const readyArgs = args => ({ waitReady: args.waitReady === true, readyTimeoutMs: num(args.readyTimeoutMs, READY_TIMEOUT_MS, 0, MAX_WAIT_MS) });
 
 export function createOps({ bundle, painter, rasterStats, send, log, readApk }) {
   let session = null, policy = null;
@@ -61,7 +65,7 @@ export function createOps({ bundle, painter, rasterStats, send, log, readApk }) 
 
   const table = {
     ping: () => ({ pong: true, revision: bundle.info.revision }),
-    templates: () => (bundle.PLUGIN_TEMPLATES ?? []).map(t => ({ id: t.id, name: t.name, description: t.description, code: t.code })),
+    templates: () => [...(bundle.PLUGIN_TEMPLATES ?? []), ...SERVICE_PLUGIN_TEMPLATES].map(t => ({ id: t.id, name: t.name, description: t.description, code: t.code })),
     /** { sessionId, policy: { allowedHosts, pluginsAllowed, maxPlugins, maxPluginCodeBytes, maxMemoryMiB }, limits: { vmHeapMb, vmHeapMaxMb, loadTimeoutMs, operationTimeoutMs, plugins: {...} }, appDataDir } */
     init: args => {
       if (session) throw conflict('already-initialized', 'This sidecar already hosts a session');
@@ -90,6 +94,10 @@ export function createOps({ bundle, painter, rasterStats, send, log, readApk }) 
     launch: async args => { const s = need(); if (args.activity !== undefined && args.activity !== null && (typeof args.activity !== 'string' || args.activity.length > 500)) throw badRequest('activity must be a class name'); await s.launch(args.activity ?? undefined); return opResult({ launchMs: s.metrics.launchMs }); },
     intent: async args => { const { deepLink } = await need().intent(intentFrom(args)); return opResult({ deepLink }); },
     back: async () => { await need().back(); return opResult(); },
+    /** "Recriar" (mode recreate, the default: Activity.recreate()) or "Reabrir" (mode reopen: a fresh instance with the same Intent). */
+    reload: async args => { const s = need(), mode = reloadModeFrom({ ...(args.mode !== undefined && args.mode !== null ? { mode: args.mode } : {}) }); await s.reload(mode); return opResult({ mode }); },
+    /** "Tela pronta": the latest snapshot.screenReady and whether it is current. */
+    ready: () => need().readiness(),
     tap: async args => {
       const s = need(), selector = selectorFrom(args), longPress = args.longPress === true;
       if (selector) { const { snapshot, element, ...rest } = await s.tapElement(selector, { longPress }); void snapshot; return opResult({ ...rest, element }); }
@@ -103,9 +111,10 @@ export function createOps({ bundle, painter, rasterStats, send, log, readApk }) 
       const { type, ...payload } = args; await s.raw(type, payload); return opResult();
     },
     wait: async args => {
-      const s = need(), selector = selectorFrom(args); if (!selector) throw badRequest('wait needs a selector');
-      const timeoutMs = num(args.timeoutMs, 10000, 0, 120000), { element, waitedMs } = await s.waitFor(selector, { timeoutMs, gone: args.gone === true });
-      return { element, waitedMs, activity: s.snapshot?.activityName ?? null };
+      const s = need(), selector = selectorFrom(args), ready = readyFlagFrom(args.ready);
+      if (!selector && !ready) throw badRequest('wait needs a selector, ready: true, or both');
+      const timeoutMs = num(args.timeoutMs, ready && !selector ? READY_TIMEOUT_MS : 10000, 0, MAX_WAIT_MS), { element, waitedMs, screenReady } = await s.waitFor(selector, { timeoutMs, gone: args.gone === true, ready });
+      return { element, waitedMs, activity: s.snapshot?.activityName ?? null, ready: screenReady?.ready ?? null, screenReady };
     },
 
     snapshot: args => { const s = need(); return args.full ? publicSnapshot(s.snapshot, { trace: num(args.trace, 50, 0, 512) }) : summary(s); },
@@ -114,8 +123,8 @@ export function createOps({ bundle, painter, rasterStats, send, log, readApk }) 
     composeTree: args => need().composeTree({ maxNodes: num(args.maxNodes, 2000, 1, 4000) }),
     screenState: async () => (await need().screenState()) ?? { text: null },
     diagnostic: () => need().diagnostic(),
-    screenshot: async args => png(await need().screenshot({ scale: num(args.scale, 1, 0.1, 4), systemBars: args.systemBars !== false })),
-    elementScreenshot: async args => { if (typeof args.key !== 'string') throw badRequest('elementScreenshot needs key'); return png(await need().elementScreenshot(args.key, { scale: num(args.scale, 1, 0.1, 4) })); },
+    screenshot: async args => png(await need().screenshot({ scale: num(args.scale, 1, 0.1, 4), systemBars: args.systemBars !== false, ...readyArgs(args) })),
+    elementScreenshot: async args => { if (typeof args.key !== 'string') throw badRequest('elementScreenshot needs key'); return png(await need().elementScreenshot(args.key, { scale: num(args.scale, 1, 0.1, 4), ...readyArgs(args) })); },
 
     activity: async () => (await need().pluginQuery('activity', {})).value,
     viewModels: async () => (await need().pluginQuery('viewModels', {})).value,

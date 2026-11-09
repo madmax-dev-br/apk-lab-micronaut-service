@@ -29,9 +29,16 @@ const ops = {
     if (text === 'missing') fail(404, 'element-not-found', 'No element on the screen matches {"text":"missing"}', { activity: 'test.fake.MainActivity' });
     return { via: 'semantics', element: { key: 'c:1:2' }, args };
   },
-  wait: args => ({ element: { key: 'c:1:2' }, waitedMs: 0, args }),
+  wait: args => args.ready === true && args.timeoutMs === 1 ? fail(408, 'ready-timeout', 'Timed out after 1 ms waiting for the screen to be ready (waiting for: quadro pendente)', { waitingFor: ['quadro pendente'] })
+    : ({ element: args.selector ? { key: 'c:1:2' } : null, waitedMs: 0, ready: args.ready === true ? true : null, args }),
+  reload: args => {
+    if (subscriptions.events) setTimeout(() => send({ event: 'session', name: 'ready', data: { seq: 2, ready: true, activity: 'test.fake.MainActivity', waitingFor: [] } }), 20);
+    return { mode: args.mode, snapshot: { activity: 'test.fake.MainActivity', screenReady: { ready: false, waitingFor: ['mensagens da thread principal para processar'] } } };
+  },
+  ready: () => ({ ready: true, current: true, activity: 'test.fake.MainActivity', screenReady: { ready: true, waitingFor: [], fragments: [] } }),
   layoutBounds: () => ({ activity: 'test.fake.MainActivity', elements: [{ key: 'c:1:2', name: 'Button', bounds: { left: 0, top: 0, right: 10, bottom: 10 } }] }),
-  screenshot: () => ({ pngBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', width: 1, height: 1, notes: { approximatedText: 0 } }),
+  screenshot: args => ({ pngBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', width: 1, height: 1, notes: { approximatedText: 0 },
+    ...(args.waitReady ? { ready: { ready: true, waitedMs: args.readyTimeoutMs, activity: 'test.fake.MainActivity' } } : {}) }),
   setPlugins: args => ({ plugins: args.plugins.map(p => ({ id: p.id, name: p.name, enabled: p.enabled !== false })) }),
   subscribe: args => {
     for (const key of Object.keys(subscriptions)) if (typeof args[key] === 'boolean') subscriptions[key] = args[key];
