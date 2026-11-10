@@ -2,7 +2,7 @@
   // GitHub Codespaces (or any devcontainer host): Java 21 + Node.js 22, the pinned APK Web Lab runtime downloaded and the runner built at creation.
   // Then: bash .devcontainer/runner.sh  (starts the runner on port 8081)  and  bash .devcontainer/demo.sh app.apk  (session + screenshot).
   "name": "APK Lab Micronaut service",
-  "image": "mcr.microsoft.com/devcontainers/java:1-21-bookworm",
+  "build": { "dockerfile": "Dockerfile" },
   "features": {
     "ghcr.io/devcontainers/features/node:1": { "version": "22" },
     // SSH server: gh codespace ssh / gh codespace cp from your terminal (copy an APK in, a screenshot out)

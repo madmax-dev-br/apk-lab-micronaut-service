@@ -9,4 +9,5 @@ cat /tmp/health.json || { tail -50 /tmp/runner.log; exit 1; }
 expected="$(node -e 'console.log(require("./sidecar/runtime.lock.json").revision)')"
 node -e 'const h=require("/tmp/health.json"); if (!h.ok || h.runtimeRevision !== process.argv[1]) { console.error("unexpected health", h); process.exit(1); } console.log("runner ok, runtime", h.runtimeRevision)' "$expected"
 [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/sessions)" = "401" ] || { echo "the API must ask for the token"; exit 1; }
+command -v sshd >/dev/null || [ -x /usr/sbin/sshd ] || { echo "the SSH server feature is missing (gh codespace ssh / cp need it)"; exit 1; }
 echo "devcontainer smoke ok"
