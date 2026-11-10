@@ -376,7 +376,10 @@ public class QueueService implements AutoCloseable {
         item.finishedAt = System.currentTimeMillis();
         if (error != null) item.error = error;
         String runnerId = item.runnerId, sessionId = item.sessionId;
-        if (runnerId != null && sessionId != null) runner(runnerId).ifPresent(r -> Thread.ofVirtual().start(() -> r.deleteSession(sessionId)));
+        // the slot is free once the runner closed the session: ask that runner for its capacity right away and dispatch, instead of waiting for the periodic health check
+        if (runnerId != null && sessionId != null) runner(runnerId).ifPresent(r -> Thread.ofVirtual().start(() -> {
+            try { r.deleteSession(sessionId); } finally { r.refreshHealth(); timers.execute(this::dispatch); }
+        }));
         item.sessionId = null;
         item.worker = null;
         emit(item, state, error == null ? null : mapper.createObjectNode().set("error", mapper.valueToTree(error)));
