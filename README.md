@@ -42,13 +42,14 @@ Fila: `QUEUE_CLIENTS="eu:<token>" QUEUE_RUNNERS=http://127.0.0.1:8081 QUEUE_RUNN
 
 ## Padrões iguais ao site
 
-Runtime fixado: revisão `5eb77725df72` (commit `6c5fe6b2` do site). Uma sessão criada sem config se comporta como o site para um visitante novo; `GET /defaults` mostra a config padrão e a resposta de `POST /sessions` traz a config com os padrões preenchidos.
+Runtime fixado: revisão `5ce2bd9b7452` (commit `fec0b0fa` do site). Uma sessão criada sem config se comporta como o site para um visitante novo; `GET /defaults` mostra a config padrão e a resposta de `POST /sessions` traz a config com os padrões preenchidos.
 
 | | Site (visitante novo) | Runner | |
 |---|---|---|---|
 | Dispositivo | phone, retrato, fonte 1, `en-US`, tema claro, 24 h, fuso do host, animações 1×, bateria 80 % sem carregar, online, gestos | igual (`sanitizeSettings` do bundle) | |
 | Rede | `allowedHosts ["*"]`, sem relay, sem redirecionamentos | igual | alvos privados recusados (abaixo) |
-| Memória da VM | automática: `navigator.deviceMemory` | igual: o shim do Worker define `navigator.deviceMemory` como o Chrome nesta máquina | 8 GiB ou mais → 1024 MiB = 671.088 objetos, heap do Worker 3072 MB |
+| Motor da VM | núcleo WebAssembly (`core.wasm` do runtime: heap Java, frames e interpretador) | igual: `engine: "wasm"`, `coreMemory: {heapMiB: 512, metaMiB: 512, threads: 1000}` | `engine: "js"` volta à VM JavaScript; `coreMemory.heapMiB` até `RUNNER_MAX_MEMORY_MIB`; valem na próxima carga |
+| Memória da VM | automática: `navigator.deviceMemory` | igual: o shim do Worker define `navigator.deviceMemory` como o Chrome nesta máquina | só com `engine: "js"`; 8 GiB ou mais → 1024 MiB = 671.088 objetos, heap do Worker 3072 MB |
 | APIs ausentes | `primitives` | `primitives` | antes era `strict` |
 | Encerrar no crash / tempo por evento / Logcat | não / 25 s / sob demanda | `strictCrash: false` / `eventSeconds: 0` / `on-demand` | |
 | Dados do app | mantidos | `appData.keep: true` em `data/app-data`, por `X-Client-Id` | `RUNNER_APP_DATA_DIR=off` desliga |

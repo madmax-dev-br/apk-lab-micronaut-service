@@ -2,11 +2,15 @@
 // method specs, permissions) plus the runner operator's network policy. Unknown keys are rejected so a typo never silently does nothing.
 import { badRequest, HttpError } from './errors.mjs';
 
-export const CONFIG_KEYS = ['device', 'network', 'permissions', 'methodOverrides', 'ignoredActivities', 'endpointMocks', 'eventSeconds', 'missingApis', 'strictCrash', 'memoryMiB', 'appData', 'raster', 'rasterScale', 'rasterNavigation', 'logcat', 'plugins', 'launch'];
+export const CONFIG_KEYS = ['device', 'network', 'permissions', 'methodOverrides', 'ignoredActivities', 'endpointMocks', 'eventSeconds', 'missingApis', 'strictCrash', 'memoryMiB', 'engine', 'coreMemory', 'appData', 'raster', 'rasterScale', 'rasterNavigation', 'logcat', 'plugins', 'launch'];
 const DEVICE_KEYS = ['screen', 'orientation', 'connectivity', 'navigation', 'fontScale', 'animatorScale', 'statusBarHeightDp', 'darkTheme', 'hour24', 'locale', 'timeZone', 'battery'];
 const NETWORK_KEYS = ['allowedHosts', 'hostMap', 'offline', 'proxyUrl'];
 const PERMISSION_KEYS = ['states', 'location', 'dialogs'];
-export const RESTART_KEYS = ['missingApis', 'strictCrash', 'memoryMiB', 'appData', 'raster'];   // take effect at the next load (POST /sessions/:id/restart); rasterScale / rasterNavigation apply live
+export const RESTART_KEYS = ['missingApis', 'strictCrash', 'memoryMiB', 'engine', 'coreMemory', 'appData', 'raster'];   // take effect at the next load (POST /sessions/:id/restart); rasterScale / rasterNavigation apply live
+/** The engines of the lab's VM: 'wasm' (the site's default: the Java heap, frames and interpreter in the bundle's vmcore/core.wasm) or 'js' (the JavaScript VM). */
+export const ENGINES = ['wasm', 'js'];
+/** The default sizes of the WebAssembly core's memory (the bundle's core-memory.js CORE_MEMORY_DEFAULT): Java heap and metaspace in MiB, live Java threads. */
+export const CORE_MEMORY_DEFAULT = Object.freeze({ heapMiB: 512, metaMiB: 512, threads: 1000 });
 export const DIALOG_MODES = ['dismiss', 'manual', 'allow', 'once', 'deny'];
 const MISSING_APIS = { strict: 'off', off: 'off', void: 'void', primitives: 'primitives', all: 'all' };
 /** "Resolução no movimento" steps (the bundle's motion-raster.js MOTION_SCALE_STEPS): 1 = always full density. */
@@ -20,7 +24,7 @@ export const RASTER_SCALE_STEPS = [1, 0.75, 0.5, 0.35, 0.25];
  */
 export function sessionDefaults(policy = {}) {
   const operator = policy.allowedHosts ?? ['*'];
-  return { network: { allowedHosts: operator.includes('*') ? ['*'] : [...operator], hostMap: [], proxyUrl: '' }, eventSeconds: 0, missingApis: 'primitives', strictCrash: false, memoryMiB: 0,
+  return { network: { allowedHosts: operator.includes('*') ? ['*'] : [...operator], hostMap: [], proxyUrl: '' }, eventSeconds: 0, missingApis: 'primitives', strictCrash: false, memoryMiB: 0, engine: 'wasm', coreMemory: { ...CORE_MEMORY_DEFAULT },
     appData: { keep: true, clear: false }, raster: 'full', rasterScale: 0.5, rasterNavigation: true, logcat: 'on-demand' };
 }
 /** A validated config with the session defaults filled in for every key the client left out (network keys one by one). */
@@ -28,6 +32,7 @@ export function withDefaults(config, policy) {
   const defaults = sessionDefaults(policy), out = { ...defaults, ...config };
   out.network = { ...defaults.network, ...(config.network ?? {}) };
   out.appData = { ...defaults.appData, ...(config.appData ?? {}) };
+  out.coreMemory = { ...defaults.coreMemory, ...(config.coreMemory ?? {}) };
   return out;
 }
 
@@ -130,6 +135,17 @@ export function validateConfig(input, { modules, policy }, { partial = false } =
   if (input.missingApis !== undefined) { if (!(input.missingApis in MISSING_APIS)) throw badRequest('config.missingApis: "primitives" (default, like the site), "strict", "void" or "all"'); out.missingApis = input.missingApis === 'off' ? 'strict' : input.missingApis; }
   if (input.strictCrash !== undefined) { if (typeof input.strictCrash !== 'boolean') throw badRequest('config.strictCrash must be a boolean'); out.strictCrash = input.strictCrash; }
   if (input.memoryMiB !== undefined) { const value = Number(input.memoryMiB); if (!modules.isMemoryStep(value)) throw badRequest(`config.memoryMiB: 0 (automatic) or one of ${modules.MEMORY_STEPS_MIB.join(', ')}`); if (value > policy.maxMemoryMiB) throw new HttpError(403, 'memory-policy', `config.memoryMiB above the runner's limit (${policy.maxMemoryMiB} MiB)`); out.memoryMiB = value; }
+  if (input.engine !== undefined) { if (!ENGINES.includes(input.engine)) throw badRequest('config.engine: "wasm" (default, like the site: the WebAssembly core) or "js" (the JavaScript VM)'); out.engine = input.engine; }
+  if (input.coreMemory !== undefined) {   // only with engine "wasm": the bundle's own rule (bounds, and the three fitting one 2 GiB WebAssembly memory)
+    only(input.coreMemory, ['heapMiB', 'metaMiB', 'threads'], 'config.coreMemory');
+    if (typeof modules.checkCoreMemory !== 'function') throw badRequest('config.coreMemory: this runtime has no WebAssembly core');
+    const bounds = modules.CORE_MEMORY_LIMITS ?? { heapMiB: [64, 1536], metaMiB: [64, 1024], threads: [16, 1000] };
+    for (const key of ['heapMiB', 'metaMiB', 'threads']) { const value = input.coreMemory[key]; if (value !== undefined && !(Number.isInteger(value) && value >= bounds[key][0] && value <= bounds[key][1])) throw badRequest(`config.coreMemory.${key}: an integer from ${bounds[key][0]} to ${bounds[key][1]}`); }
+    const checked = modules.checkCoreMemory({ ...(modules.CORE_MEMORY_DEFAULT ?? CORE_MEMORY_DEFAULT), ...input.coreMemory });
+    if (checked.error) throw badRequest(`config.coreMemory: heapMiB 64-1536, metaMiB 64-1024, threads 16-1000 (1 MiB each), at most 2048 MiB in all (${String(checked.error).slice(0, 200)})`);
+    if (checked.value.heapMiB > policy.maxMemoryMiB) throw new HttpError(403, 'memory-policy', `config.coreMemory.heapMiB above the runner's limit (${policy.maxMemoryMiB} MiB)`);
+    out.coreMemory = checked.value;
+  }
   if (input.appData !== undefined) { only(input.appData, ['keep', 'clear'], 'config.appData'); out.appData = { keep: input.appData.keep !== false, clear: input.appData.clear === true }; }
   if (input.raster !== undefined) { if (!['progressive', 'full'].includes(input.raster)) throw badRequest('config.raster: "full" (default) or "progressive"'); out.raster = input.raster; }
   if (input.rasterScale !== undefined) { const value = Number(input.rasterScale); if (typeof input.rasterScale !== 'number' || !RASTER_SCALE_STEPS.includes(value)) throw badRequest(`config.rasterScale: one of ${RASTER_SCALE_STEPS.join(', ')} (default 0.5; used while the screen moves when raster is "progressive")`); out.rasterScale = value; }
@@ -160,7 +176,7 @@ export function deviceForVM(config, modules) {
   const settings = modules.sanitizeSettings({ ...(config.device ?? {}), network: { allowedHosts: config.network?.allowedHosts ?? [], hostMap: config.network?.hostMap ?? [], proxyUrl: config.network?.proxyUrl ?? '' } });
   if (config.network?.offline) settings.connectivity = 'offline';
   else if (config.device?.connectivity) settings.connectivity = config.device.connectivity;
-  delete settings.location; delete settings.layoutBounds; delete settings.memoryMiB; delete settings.eventSeconds; delete settings.raster;   // raster settings travel as load options / the raster-settings side message
+  delete settings.location; delete settings.layoutBounds; delete settings.memoryMiB; delete settings.eventSeconds; delete settings.raster; delete settings.engine; delete settings.coreMemory; delete settings.renderer;   // raster settings travel as load options / the raster-settings side message
   return settings;
 }
 export const missingApisMode = value => MISSING_APIS[value ?? 'primitives'] ?? 'primitives';

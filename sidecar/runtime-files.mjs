@@ -3,7 +3,7 @@
 export const SITE_REPO = 'madmax-dev-br/apk-browser-lab-site';
 export const SITE_URL = 'https://madmax-dev-br.github.io/apk-browser-lab-site/';
 
-const EXCLUDED_DIRS = ['fixtures/', 'hermes-proof/', 'net-probe/', 'player/', 'compose/', 'comparison/', 'docs/', '.git/', '.github/'];
+const EXCLUDED_DIRS = ['fixtures/', 'hermes-proof/', 'net-probe/', 'player/', 'compose/', 'comparison/', 'docs/', 'wasm/', '.git/', '.github/'];   // wasm/: a second copy of the whole site kept under that path
 const EXCLUDED_FILES = /(^|\/)(\.nojekyll|styles\.css)$|\.(html|map|apk)$/i;
 
 /** true when `relative` (a site path with "/" separators) belongs to the runtime. */
