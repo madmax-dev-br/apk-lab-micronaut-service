@@ -75,6 +75,7 @@
   <li><strong>Isolamento:</strong> um processo por sessão. Um crash, um loop ou falta de memória derruba só aquela sessão; o runner mostra o erro com as últimas linhas do sidecar e permite <code>POST /sessions/{id}/restart</code>.</li>
   <li><strong>Memória:</strong> <code>--max-old-space-size</code> no processo (<code>RUNNER_SIDECAR_HEAP_MB</code>) e <code>resourceLimits</code> no Worker da VM (2 × o orçamento Java da sessão + 1024 MB, no mínimo <code>RUNNER_VM_HEAP_MB</code> e no máximo <code>RUNNER_VM_HEAP_MAX_MB</code>; veja <a href="#memoria">Memória da VM</a>).</li>
   <li><strong>Ambiente limpo:</strong> o sidecar recebe só <code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code> e o diretório do runtime; nunca o <code>RUNNER_TOKEN</code> nem outras variáveis do runner.</li>
+  <li><strong>Motor da VM:</strong> por padrão a sessão roda no núcleo WebAssembly do runtime (<code>vmcore/core.wasm</code>: heap Java, frames e interpretador), o mesmo padrão do site; <code>engine: "js"</code> na config usa a VM JavaScript. O núcleo é só o interpretador: o modelo de classes, as pontes do framework Android e o Skia continuam em JavaScript e WebAssembly no Worker do sidecar, por isso ele também não roda sozinho na JVM. <code>coreMemory</code> dimensiona heap, metaspace e threads do núcleo, e <code>vmHealth.core</code> mostra o uso.</li>
   <li><strong>Direção futura (não implementada):</strong> GraalJS + GraalWasm poderiam hospedar a VM dentro da JVM, sem processo extra. Faltam a semântica de <code>worker_threads</code>/Worker, o desempenho de WebAssembly equivalente ao V8 e uma validação completa do runtime nesse ambiente.</li>
 </ul>
 
@@ -84,7 +85,7 @@
 {"id": 7, "op": "tap", "args": {"selector": {"testTag": "salvar"}}}
 
 # sidecar -> runner (stdout)
-{"event": "ready", "protocol": 1, "revision": "5eb77725df72", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
+{"event": "ready", "protocol": 1, "revision": "5ce2bd9b7452", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
 {"id": 7, "ok": true, "result": {"via": "semantics", "element": {...}, "snapshot": {...}}}
 {"id": 8, "ok": false, "error": {"status": 404, "code": "element-not-found", "message": "...", "details": {"activity": "..."}}}
 {"event": "logcat", "data": [{"seq": 41, "level": "W", "tag": "APKWebLab", "message": "..."}]}       # só com assinatura
@@ -120,7 +121,7 @@ export RUNNER_TOKEN=$(openssl rand -hex 24)
 export QUEUE_CLIENTS="eu:$(openssl rand -hex 16)" QUEUE_RUNNERS="http://127.0.0.1:8081" QUEUE_RUNNER_TOKEN=$RUNNER_TOKEN
 ./gradlew :queue:run              # http://127.0.0.1:8080</code></pre>
 <pre><code>curl -s http://127.0.0.1:8081/health
-# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"5eb77725df72","maxSessions":2,"available":2,
+# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"5ce2bd9b7452","maxSessions":2,"available":2,
 #  "memory":{"budgetMiB":1024,"maxHeapObjects":671088,"source":"navigator.deviceMemory=8","deviceMemory":8.0,"workerHeapMb":3072},
 #  "network":{"allowedHosts":["*"],"allowPrivateNetwork":false},"appData":true,...}</code></pre>
 <p>O runtime vem do repositório público do site, <strong>no commit fixado</strong> em <code>sidecar/runtime.lock.json</code> (revisão do <code>build-info.json</code>, lista de arquivos, tamanho e SHA-256). Uma publicação nova do site não muda o que este repositório roda. Para usar outra cópia do runtime (por exemplo, um <code>dist/</code> que você construiu), aponte <code>APK_LAB_RUNTIME_DIR</code> para ela. <code>node sidecar/fetch-runtime.mjs --check</code> confere uma cópia existente; <code>--base &lt;url&gt;</code> baixa de um espelho (os hashes continuam valendo).</p>

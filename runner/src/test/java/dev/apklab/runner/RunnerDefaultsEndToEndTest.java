@@ -89,7 +89,23 @@ class RunnerDefaultsEndToEndTest implements TestPropertyProvider {
         assertEquals("full", config.path("raster").asText());
         assertTrue(config.path("appData").path("keep").asBoolean());
         assertTrue(ok(http.post("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 30000))).json().path("ready").asBoolean());
-        assertEquals(expected, ok(http.get("/sessions/" + id + "/snapshot")).json().path("vmHealth").path("limit").asInt(), "the VM got the limit the session reports");
+        // The default engine is the site's: the WebAssembly core, with its default memory (512 MiB heap, 512 MiB metaspace, 1000 threads).
+        assertEquals("wasm", config.path("engine").asText(), config::toString);
+        assertEquals("{\"heapMiB\":512,\"metaMiB\":512,\"threads\":1000}", config.path("coreMemory").toString());
+        assertEquals("wasm", memory.path("engine").asText(), memory::toString);
+        JsonNode health0 = ok(http.get("/sessions/" + id + "/snapshot")).json().path("vmHealth");
+        assertEquals("wasm", health0.path("engine").asText(), health0::toString);
+        assertEquals(1000, health0.path("core").path("threadCapacity").asInt(), "the core got the thread capacity the session reports");
+        assertTrue(health0.path("core").path("metaBytes").asLong() > 0);
+        // engine "js": the JavaScript VM, whose object limit is the budget the session reports.
+        JsonNode onJs = create("compose-approvals-debug.apk", "{\"launch\":true,\"engine\":\"js\"}");
+        String jsId = onJs.path("session").path("id").asText();
+        assertEquals("js", onJs.path("session").path("memory").path("engine").asText());
+        assertTrue(ok(http.post("/sessions/" + jsId + "/wait", Map.of("ready", true, "timeoutMs", 30000))).json().path("ready").asBoolean());
+        JsonNode jsHealth = ok(http.get("/sessions/" + jsId + "/snapshot")).json().path("vmHealth");
+        assertEquals("js", jsHealth.path("engine").asText());
+        assertEquals(expected, jsHealth.path("limit").asInt(), "the VM got the limit the session reports");
+        ok(http.delete("/sessions/" + jsId));
         JsonNode reloaded = ok(http.post("/sessions/" + id + "/reload", Map.of("mode", "recreate"))).json();
         assertTrue(reloaded.path("snapshot").path("activity").asText().endsWith("MainActivity"));
         assertTrue(ok(http.post("/sessions/" + id + "/wait", Map.of("ready", true, "timeoutMs", 30000))).json().path("ready").asBoolean());

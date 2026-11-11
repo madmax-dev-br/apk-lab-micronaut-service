@@ -110,3 +110,21 @@ test('the bundle\'s own memoryBudget matches the rule the tests assume', { skip:
   const { memoryBudget } = await import(path.join(runtime.dir, 'runtime/memory-budget.js'));
   for (const deviceMemory of [0.25, 0.5, 1, 2, 4, 8, null]) assert.deepEqual(memoryBudget({ deviceMemory }).maxHeapObjects, labBudget({ deviceMemory }).maxHeapObjects, String(deviceMemory));
 });
+
+test('engine and coreMemory: the default is the site\'s (the WebAssembly core, 512 / 512 / 1000); both are validated and take effect at the next load', () => {
+  const defaults = sessionDefaults({ allowedHosts: ['*'] });
+  assert.equal(defaults.engine, 'wasm'); assert.deepEqual(defaults.coreMemory, { heapMiB: 512, metaMiB: 512, threads: 1000 });
+  assert.deepEqual(withDefaults({ coreMemory: { heapMiB: 256 } }, { allowedHosts: ['*'] }).coreMemory, { heapMiB: 256, metaMiB: 512, threads: 1000 });
+  const LIMITS = { heapMiB: [64, 1536], metaMiB: [64, 1024], threads: [16, 1000] };
+  const checkCoreMemory = raw => { const total = raw.heapMiB + raw.metaMiB + raw.threads + 32; return { value: { ...raw }, totalMiB: total, error: total > 2048 ? `${total} MiB` : null }; };   // the shape of the bundle's rule
+  const modules = { checkCoreMemory, CORE_MEMORY_LIMITS: LIMITS, CORE_MEMORY_DEFAULT: { heapMiB: 512, metaMiB: 512, threads: 1000 } }, policy = { allowedHosts: ['*'], maxMemoryMiB: 1024 };
+  const check = input => validateConfig(input, { modules, policy }, { partial: true });
+  assert.equal(check({ engine: 'js' }).engine, 'js'); assert.equal(check({ engine: 'wasm' }).engine, 'wasm');
+  assert.throws(() => check({ engine: 'graal' }), /config\.engine/);
+  assert.deepEqual(check({ coreMemory: { heapMiB: 256, metaMiB: 200, threads: 130 } }).coreMemory, { heapMiB: 256, metaMiB: 200, threads: 130 });
+  assert.throws(() => check({ coreMemory: { heapMiB: 10 } }), /coreMemory\.heapMiB: an integer from 64 to 1536/);
+  assert.throws(() => check({ coreMemory: { threads: 12.5 } }), /coreMemory\.threads/);
+  assert.throws(() => check({ coreMemory: { heap: 256 } }), /unknown keys heap/);
+  assert.throws(() => check({ coreMemory: { heapMiB: 1024, metaMiB: 1024 } }), /at most 2048 MiB/);
+  assert.throws(() => check({ coreMemory: { heapMiB: 1536, metaMiB: 64, threads: 16 } }), error => error.status === 403 || /runner's limit/.test(error.message));
+});

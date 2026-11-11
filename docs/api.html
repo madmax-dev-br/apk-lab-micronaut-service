@@ -71,7 +71,7 @@
 
 <h2 id="servico">Runner: serviço</h2>
 <p class="endpoint"><span class="method">GET</span> /health <small>(público)</small></p>
-<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "5eb77725df72",
+<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "5ce2bd9b7452",
  "pluginsAllowed": false, "maxSessions": 2, "activeSessions": 1, "reserved": 0, "available": 1, "freeMemoryMb": 14980,
  "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8.0, "workerHeapMb": 3072},
  "network": {"allowedHosts": ["*"], "allowPrivateNetwork": false}, "appData": true}</code></pre>
@@ -97,7 +97,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/vnd.android.pac
 curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      -d "{\"apkBase64\": \"$(base64 &lt; app.apk | tr -d '\n')\", \"config\": {\"launch\": true}}" $R/sessions</code></pre>
 <pre><code>{"session": {"id": "5efd76bf-...", "state": "running", "packageName": "com.exemplo.app", "launcherActivity": "com.exemplo.app.MainActivity",
-             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "5eb77725df72",
+             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "5ce2bd9b7452",
              "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8, "workerHeapMb": 3072, "liveObjects": 40276, "vmLimit": 671088}, ...},
  "inventory": {"packageName": "...", "usesSdk": {"minSdkVersion": 24, "targetSdkVersion": 34}, "activities": [...], "usesPermissions": [...], ...},
  "config": { ...a config normalizada... },
@@ -124,7 +124,9 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
   "eventSeconds": 0,
   "missingApis": "primitives",  // reload; padrão como no site; "strict" | "void" | "all" (stubs sempre relatados no diagnóstico)
   "strictCrash": false,         // reload
-  "memoryMiB": 0,               // reload; 0 = automático, ou 512 | 1024 | 2048 | 3072 | 4096 (até RUNNER_MAX_MEMORY_MIB)
+  "memoryMiB": 0,               // reload; só com engine "js": 0 = automático, ou 512 | 1024 | 2048 | 3072 | 4096 (até RUNNER_MAX_MEMORY_MIB)
+  "engine": "wasm",             // reload; padrão como no site: o núcleo WebAssembly do runtime; "js" = a VM JavaScript
+  "coreMemory": {"heapMiB": 512, "metaMiB": 512, "threads": 1000},   // reload; só com engine "wasm": heap Java 64-1536 (até RUNNER_MAX_MEMORY_MIB), metaspace 64-1024, threads vivas 16-1000 (1 MiB cada); no máximo 2048 MiB somados
   "appData": {"keep": true, "clear": false},   // reload
   "raster": "full",             // reload; padrão no servidor, ou "progressive"
   "rasterScale": 0.5,           // ao vivo; 1 | 0.75 | 0.5 | 0.35 | 0.25, escala no movimento com "progressive"

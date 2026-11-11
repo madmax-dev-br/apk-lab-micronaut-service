@@ -40,6 +40,10 @@ public record SessionConfig(
         @Nullable Boolean strictCrash,
         /** Java heap budget of the VM in MiB: 0 (automatic) or 512, 1024, 2048, 3072, 4096 (bounded by the runner's RUNNER_MAX_MEMORY_MIB). */
         @Nullable @Min(0) @Max(4096) Integer memoryMiB,
+        /** The VM engine: "wasm" (default, like the site: the Java heap, frames and interpreter in the runtime's WebAssembly core) or "js" (the JavaScript VM); next load. */
+        @Nullable @Pattern(regexp = "wasm|js") String engine,
+        /** With engine "wasm": the sizes of the core's memory (defaults 512, 512, 1000; at most 2048 MiB in all; heapMiB bounded by RUNNER_MAX_MEMORY_MIB); next load. */
+        @Nullable @Valid CoreMemory coreMemory,
         @Nullable @Valid AppData appData,
         /** "full" (default on the server: a screenshot never captures a reduced frame) or "progressive" (reduced while the screen moves). */
         @Nullable @Pattern(regexp = "progressive|full") String raster,
@@ -53,7 +57,7 @@ public record SessionConfig(
         /** true (launcher Activity), false, or an Activity class name: launch right after loading. */
         @Nullable JsonNode launch
 ) {
-    public static SessionConfig empty() { return new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null); }
+    public static SessionConfig empty() { return new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null); }
 
     /** The "Resolução no movimento" steps of the lab (runtime/motion-raster.js MOTION_SCALE_STEPS). */
     public static final List<Double> RASTER_SCALE_STEPS = List.of(1.0, 0.75, 0.5, 0.35, 0.25);
@@ -150,6 +154,11 @@ public record SessionConfig(
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Header(@NotBlank @Size(max = 200) String name, @Nullable @Size(max = 8000) String value) {}
+
+    /** Java heap and metaspace of the WebAssembly core in MiB and how many Java threads may be alive (1 MiB each); the three share one memory of at most 2048 MiB. */
+    @Introspected
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record CoreMemory(@Nullable @Min(64) @Max(1536) Integer heapMiB, @Nullable @Min(64) @Max(1024) Integer metaMiB, @Nullable @Min(16) @Max(1000) Integer threads) {}
 
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)
