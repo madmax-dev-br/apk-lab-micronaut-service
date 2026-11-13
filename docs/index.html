@@ -24,6 +24,7 @@
 <aside class="toc">
   <p class="label">Nesta página</p>
   <a href="#o-que-e">O que é</a>
+  <a href="#quem-roda">Java, JavaScript e WebAssembly</a>
   <a href="#arquitetura">Arquitetura</a>
   <a href="#por-que-sidecar">Por que um sidecar Node</a>
   <a href="#protocolo">Protocolo do sidecar</a>
@@ -48,6 +49,16 @@
   <div class="card"><h3>Fila</h3><p>Jobs declarativos (passos: iniciar, esperar texto/testTag ou a tela pronta, recarregar a tela, tocar, digitar, screenshot, limites de layout, campo de ViewModel, campos estáticos e objetos vivos de um tipo, Logcat, rede, plugins) e leases interativos com proxy da API do runner. Prioridades, justiça entre clientes, capacidade lida do health dos runners, retentativas, cancelamento, progresso por SSE e retenção.</p></div>
   <div class="card"><h3>Mesma API do serviço Node</h3><p>Os caminhos e corpos JSON são os do <a href="https://github.com/madmax-dev-br/apk-lab-node-service">apk-lab-node-service</a>: um cliente escrito para um funciona no outro, e a fila de um pode usar runners do outro.</p></div>
 </div>
+
+<h2 id="quem-roda">Java, JavaScript e WebAssembly: quem roda o quê</h2>
+<p>O serviço é Java, mas o APK não é interpretado na JVM. O runner Micronaut gerencia sessões e fala HTTP; cada sessão abre um processo Node (o sidecar) que roda o runtime do APK Web Lab, o mesmo build que o site serve no navegador, em JavaScript e WebAssembly. O Java não executa JavaScript nem WebAssembly: ele inicia o sidecar, manda as operações e lê as respostas, uma mensagem JSON por linha.</p>
+<table>
+<tr><th>Camada</th><th>Onde roda</th><th>O que faz</th></tr>
+<tr><td><strong>Java</strong> (Micronaut 4, Java 21)</td><td>a JVM do runner e da fila</td><td>API HTTP, autenticação, CORS, validação da config, uma sessão por processo sidecar (limites, timeouts, encerramento), fila de jobs e leases, artefatos.</td></tr>
+<tr><td><strong>JavaScript</strong> (Node 22)</td><td>o processo sidecar, um por sessão (<code>sidecar/vm-host.mjs</code>)</td><td>o Worker da VM do lab (<code>runtime/apk-worker.js</code>) sem modificações, num <code>worker_threads</code> Worker com os globais de um Web Worker; o framework Android original em DEX, interpretado; plugins em Workers isolados; a composição dos prints.</td></tr>
+<tr><td><strong>WebAssembly</strong></td><td>dentro do sidecar</td><td>o núcleo da VM (<code>vmcore/core.wasm</code>: heap Java, frames e o interpretador de bytecode Dalvik, o motor padrão), Skia via CanvasKit (desenho e prints), SQLite, ICU, zlib, codecs de imagem e as bibliotecas nativas do lab compiladas para wasm32 quando um app as carrega.</td></tr>
+</table>
+<p>Por que não dentro da JVM: o runtime espera o ambiente de um Web Worker (mensagens, <code>fetch</code>, WebAssembly) e é o build publicado do site, fixado por hash em <code>sidecar/runtime.lock.json</code>. Rodá-lo como está, num Node ao lado, mantém o comportamento igual ao do site e isola cada sessão num processo (veja <a href="#por-que-sidecar">Por que um sidecar Node</a> e o <a href="#protocolo">protocolo</a>).</p>
 
 <h2 id="arquitetura">Arquitetura</h2>
 <div class="diagram" role="img" aria-label="Clientes chamam a fila Micronaut ou o runner Micronaut; o runner abre um processo sidecar Node por sessão; o sidecar roda o Worker do APK Web Lab em worker_threads com o runtime baixado do site público.">

@@ -9,6 +9,16 @@ Rode APKs Android reais num servidor Java com o runtime do [APK Web Lab](https:/
 
 A VM do lab é JavaScript + WebAssembly e não roda dentro da JVM: cada sessão do runner dirige um **sidecar Node** (`sidecar/vm-host.mjs`, Node 22+) que roda o Worker do runtime público num `worker_threads` Worker e fala JSON lines pelo stdin/stdout. O runner cuida de HTTP, autenticação, CORS, validação, limites, SSE e do ciclo de vida do processo (timeouts, limite de linha, crash com erro claro e restart). Detalhes em [Visão geral](https://madmax-dev-br.github.io/apk-lab-micronaut-service/#arquitetura).
 
+### Java, JavaScript e WebAssembly: quem roda o quê
+
+| Camada | Onde roda | O que faz |
+| --- | --- | --- |
+| **Java** (Micronaut 4, Java 21) | a JVM do runner e da fila | API HTTP, autenticação, CORS, validação da config, uma sessão por processo sidecar (limites, timeouts), fila de jobs e leases, artefatos |
+| **JavaScript** (Node 22) | o sidecar, um processo por sessão (`sidecar/vm-host.mjs`) | o Worker da VM do lab (`runtime/apk-worker.js`) sem modificações, num `worker_threads` Worker; o framework Android original em DEX, interpretado; plugins em Workers isolados; a composição dos prints |
+| **WebAssembly** | dentro do sidecar | o núcleo da VM (`vmcore/core.wasm`: heap Java, frames e o interpretador de bytecode Dalvik, o motor padrão), Skia via CanvasKit, SQLite, ICU, zlib, codecs de imagem e bibliotecas nativas do lab compiladas para wasm32 |
+
+O Java não executa JavaScript nem WebAssembly: ele inicia o sidecar, manda as operações e lê as respostas (JSON lines). O sidecar roda o mesmo build que o site serve no navegador, fixado por hash.
+
 A API (caminhos, corpos JSON, erros, eventos SSE, passos de job) é a mesma do [apk-lab-node-service](https://github.com/madmax-dev-br/apk-lab-node-service).
 
 ## Testar no GitHub Codespaces
