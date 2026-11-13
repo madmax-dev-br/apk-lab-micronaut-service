@@ -42,7 +42,7 @@ Fila: `QUEUE_CLIENTS="eu:<token>" QUEUE_RUNNERS=http://127.0.0.1:8081 QUEUE_RUNN
 
 ## Padrões iguais ao site
 
-Runtime fixado: revisão `5ce2bd9b7452` (commit `fec0b0fa` do site). Uma sessão criada sem config se comporta como o site para um visitante novo; `GET /defaults` mostra a config padrão e a resposta de `POST /sessions` traz a config com os padrões preenchidos.
+Runtime fixado: revisão `ddd036d06d3d` (commit `0101a0aa` do site). Uma sessão criada sem config se comporta como o site para um visitante novo; `GET /defaults` mostra a config padrão e a resposta de `POST /sessions` traz a config com os padrões preenchidos.
 
 | | Site (visitante novo) | Runner | |
 |---|---|---|---|
@@ -53,6 +53,7 @@ Runtime fixado: revisão `5ce2bd9b7452` (commit `fec0b0fa` do site). Uma sessão
 | APIs ausentes | `primitives` | `primitives` | antes era `strict` |
 | Encerrar no crash / tempo por evento / Logcat | não / 25 s / sob demanda | `strictCrash: false` / `eventSeconds: 0` / `on-demand` | |
 | Dados do app | mantidos | `appData.keep: true` em `data/app-data`, por `X-Client-Id` | `RUNNER_APP_DATA_DIR=off` desliga |
+| Resolução com a tela parada | 100 % | `rasterSettled: 1` (ou 0.9, 0.8) | ao vivo; um print é sempre em densidade total |
 | Resolução no movimento | 0,5, tela nova reduzida | `rasterScale: 0.5`, `rasterNavigation: true` | valem com `raster: "progressive"`, na carga e ao vivo |
 | WebView | ligado | **desligado** | exceção: não há navegador no servidor |
 | Raster | progressivo | **`full`** | exceção: uma captura nunca pega um quadro reduzido |
@@ -70,6 +71,14 @@ Runtime fixado: revisão `5ce2bd9b7452` (commit `fec0b0fa` do site). Uma sessão
 - Plugins (o runtime de plugins do bundle): `screen.ready`, `lab.on('ready', fn)`, `await lab.waitReady({timeoutMs})`, e o modelo "Print na tela pronta" em `GET /plugin-templates`.
 
 Receitas 16 ("Recarregar a tela") e 17 ("Esperar a tela ficar pronta e tirar o print") em [Receitas](https://madmax-dev-br.github.io/apk-lab-micronaut-service/cookbook.html#r16).
+
+## Um componente e pedaços da tela
+
+- Num plugin enviado pela API (`PUT /sessions/{id}/plugins`, com `RUNNER_ALLOW_PLUGINS=true`): `await lab.find(alvo)` devolve os componentes que casam (`testTag`, `android:id`, `key`, texto, ...) e `await lab.capture(alvo, {padding})` o PNG só daquele componente; `lab.screenshot({bounds, padding})` corta uma caixa da janela. As imagens saem em `GET /sessions/{id}/plugins/{pid}/blocks/{index}/image`.
+- Sem plugin: `GET /sessions/{id}/screenshot.png?rect=left,top,right,bottom&padding=8` (caixa da janela em dp; cabeçalho `X-Screen-Bounds`), `?padding=` na captura de um elemento, e `POST /sessions/{id}/screenshot-pieces` com `{"pieces": [{"selector": ...} | {"key": ...} | {"rect": ...}], "padding": 4}`: até 16 pedaços cortados de uma pintura só, cada um com seu elemento, caixa e PNG em base64 (ou um `error` próprio, sem derrubar os outros).
+- Na fila: `screenshot` aceita `rect` e `padding`; o passo `screenshotPieces` guarda um artefato por pedaço.
+
+Receita 19 em [Receitas](https://madmax-dev-br.github.io/apk-lab-micronaut-service/cookbook.html#r19).
 
 ## Estado fora da tela
 

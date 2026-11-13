@@ -100,8 +100,11 @@ test('raster settings: rasterScale steps and rasterNavigation validated; applied
   session.client = { worker: {}, setRasterSettings: async settings => { sent.push(settings); return { scale: settings.scale, enabled: true, navigation: settings.navigation }; } }; session.state = 'running';
   session.config = withDefaults({ raster: 'progressive' }, { allowedHosts: ['*'] });
   const result = await session.updateConfig({ rasterScale: 0.25 });
-  assert.deepEqual(sent, [{ scale: 0.25, navigation: true }]); assert.deepEqual(result.applied, [{ key: 'raster', raster: { scale: 0.25, enabled: true, navigation: true } }]); assert.deepEqual(result.restartRequired, []);
-  await session.updateConfig({ rasterNavigation: false }); assert.deepEqual(sent[1], { scale: 0.25, navigation: false }, 'the other setting is kept');
+  assert.deepEqual(sent, [{ scale: 0.25, navigation: true, settled: 1 }]); assert.deepEqual(result.applied, [{ key: 'raster', raster: { scale: 0.25, enabled: true, navigation: true } }]); assert.deepEqual(result.restartRequired, []);
+  await session.updateConfig({ rasterNavigation: false }); assert.deepEqual(sent[1], { scale: 0.25, navigation: false, settled: 1 }, 'the other setting is kept');
+  await session.updateConfig({ rasterSettled: 0.9 }); assert.deepEqual(sent[2], { scale: 0.25, navigation: false, settled: 0.9 }, '"Resolução com a tela parada" applies live');
+  for (const bad of [{ rasterSettled: 0.5 }, { rasterSettled: '1' }]) assert.throws(() => v(bad), { status: 400 }, JSON.stringify(bad));
+  assert.equal(v({ rasterSettled: 0.8 }).rasterSettled, 0.8);
   assert.deepEqual((await session.updateConfig({ raster: 'full' })).restartRequired, ['raster']);
   assert.deepEqual(session.memoryFor(), { budgetMiB: 1024, maxHeapObjects: 671088, source: 'navigator.deviceMemory=8', deviceMemory: 8 });
 });

@@ -51,16 +51,20 @@ public record SessionConfig(
         @Nullable @DecimalMin("0.25") @DecimalMax("1") Double rasterScale,
         /** "Tela nova em baixa resolução" with raster "progressive": a new screen starts reduced (default true); applied live. */
         @Nullable Boolean rasterNavigation,
+        /** "Resolução com a tela parada": 1 (default), 0.9 or 0.8, the density a still screen is drawn at; applied live. A screenshot is always full density. */
+        @Nullable @DecimalMin("0.8") @DecimalMax("1") Double rasterSettled,
         /** "on-demand" (default: Logcat lines leave the VM only while someone reads them) or "always". */
         @Nullable @Pattern(regexp = "on-demand|always") String logcat,
         @Nullable @Valid @Size(max = 32) List<@Valid PluginSpec> plugins,
         /** true (launcher Activity), false, or an Activity class name: launch right after loading. */
         @Nullable JsonNode launch
 ) {
-    public static SessionConfig empty() { return new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null); }
+    public static SessionConfig empty() { return new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null); }
 
     /** The "Resolução no movimento" steps of the lab (runtime/motion-raster.js MOTION_SCALE_STEPS). */
     public static final List<Double> RASTER_SCALE_STEPS = List.of(1.0, 0.75, 0.5, 0.35, 0.25);
+    /** The "Resolução com a tela parada" steps of the lab (runtime/motion-raster.js SETTLED_SCALE_STEPS). */
+    public static final List<Double> RASTER_SETTLED_STEPS = List.of(1.0, 0.9, 0.8);
 
     @Introspected
     @JsonInclude(JsonInclude.Include.NON_NULL)

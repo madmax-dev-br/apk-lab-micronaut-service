@@ -41,7 +41,8 @@ public final class Steps {
         FIELDS.put("scroll", List.of("selector", "x", "y", "dx", "dy"));
         FIELDS.put("back", List.of());
         FIELDS.put("sleep", List.of("ms"));
-        FIELDS.put("screenshot", List.of("scale", "selector", "key", "systemBars", "waitReady"));
+        FIELDS.put("screenshot", List.of("scale", "selector", "key", "systemBars", "waitReady", "rect", "padding"));
+        FIELDS.put("screenshotPieces", List.of("pieces", "padding", "scale", "waitReady"));
         FIELDS.put("layoutBounds", List.of("names"));
         FIELDS.put("snapshot", List.of());
         FIELDS.put("elements", List.of("selector"));
@@ -64,6 +65,26 @@ public final class Steps {
     }
 
     private Steps() {}
+
+    /** A box of the window in dp as the runner's query value "left,top,right,bottom": from that string, a list of four numbers or { left, top, right, bottom }. */
+    static String rectQuery(Object rect, String where) {
+        List<?> parts;
+        if (rect instanceof String text) parts = List.of(text.split(",", -1));
+        else if (rect instanceof List<?> list) parts = list;
+        else if (rect instanceof Map<?, ?> map) parts = java.util.Arrays.asList(map.get("left"), map.get("top"), map.get("right"), map.get("bottom"));
+        else throw ApiException.badRequest(where + ": left,top,right,bottom in dp of the window");
+        if (parts.size() != 4) throw ApiException.badRequest(where + ": left,top,right,bottom in dp of the window");
+        double[] v = new double[4];
+        for (int i = 0; i < 4; i++) {
+            Object part = parts.get(i);
+            try { v[i] = part instanceof Number n ? n.doubleValue() : Double.parseDouble(String.valueOf(part).trim()); }
+            catch (NumberFormatException e) { throw ApiException.badRequest(where + ": four numbers in dp"); }
+            if (!Double.isFinite(v[i]) || Math.abs(v[i]) > 10000) throw ApiException.badRequest(where + ": four numbers in dp");
+        }
+        if (!(v[2] > v[0] && v[3] > v[1])) throw ApiException.badRequest(where + ": right must be greater than left and bottom greater than top");
+        return fmt(v[0]) + "," + fmt(v[1]) + "," + fmt(v[2]) + "," + fmt(v[3]);
+    }
+    private static String fmt(double v) { return v == Math.rint(v) ? String.valueOf((long) v) : String.valueOf(v); }
 
     /** One artifact a step produced (a screenshot, a JSON dump). */
     public record Artifact(String name, String type, byte[] bytes) {}
@@ -115,6 +136,19 @@ public final class Steps {
                     if (!pluginsAllowed) throw ApiException.forbidden("plugins-disabled", where + ": plugins are disabled on this queue (QUEUE_ALLOW_PLUGINS)");
                     if (step.plugins() == null || step.plugins().isEmpty()) throw ApiException.badRequest(where + " (plugins) needs a plugins list");
                     if (step.seconds() == null) throw ApiException.badRequest(where + " (plugins) needs seconds between 0 and 300");
+                }
+                case "screenshot" -> {
+                    if (step.rect() != null && (hasSelector || step.key() != null)) throw ApiException.badRequest(where + " (screenshot): rect or selector/key, not both");
+                    if (step.rect() != null) rectQuery(step.rect(), where + ".rect");
+                }
+                case "screenshotPieces" -> {
+                    if (step.pieces() == null || step.pieces().isEmpty()) throw ApiException.badRequest(where + " (screenshotPieces) needs pieces: [{ selector } | { key } | { rect }], 1 to 16");
+                    for (int i = 0; i < step.pieces().size(); i++) {
+                        Map<String, Object> piece = step.pieces().get(i);
+                        long given = java.util.stream.Stream.of("rect", "key", "selector").filter(piece::containsKey).count();
+                        if (given != 1) throw ApiException.badRequest(where + ".pieces[" + i + "]: exactly one of rect, key or selector");
+                        if (piece.containsKey("rect")) rectQuery(piece.get("rect"), where + ".pieces[" + i + "].rect");
+                    }
                 }
                 case "config" -> { if (step.config() == null) throw ApiException.badRequest(where + " (config) needs a config object"); }
                 case "intent" -> { if (step.intent() == null) throw ApiException.badRequest(where + " (intent) needs an intent object"); }
@@ -202,7 +236,9 @@ public final class Steps {
                     if (found.size() <= at) throw new ApiException(404, "element-not-found", "screenshot: no element matches " + stepJson.get("selector"));
                     key = found.get(at).path("key").asText();
                 }
-                if (key != null) path = "/elements/" + URLEncoder.encode(key, StandardCharsets.UTF_8) + "/screenshot.png?scale=" + scale + ready;
+                String pad = step.padding() == null ? "" : "&padding=" + step.padding();
+                if (step.rect() != null) path += "&rect=" + rectQuery(step.rect(), "rect") + pad;
+                if (key != null) path = "/elements/" + URLEncoder.encode(key, StandardCharsets.UTF_8) + "/screenshot.png?scale=" + scale + ready + pad;
                 RunnerGateway.Bytes shot = runner.bytes(sessionId, path, timeout);
                 String name = label + ".png";
                 ObjectNode out = mapper.createObjectNode().put("artifact", name).put("bytes", shot.bytes().length);
@@ -210,6 +246,30 @@ public final class Steps {
                 if (shot.notes() != null) { try { out.set("notes", mapper.readTree(shot.notes())); } catch (java.io.IOException ignored) { /* not JSON */ } }
                 if (shot.ready() != null) { try { out.set("ready", mapper.readTree(shot.ready())); } catch (java.io.IOException ignored) { /* not JSON */ } }
                 return new Outcome(out, List.of(new Artifact(name, "image/png", shot.bytes())));
+            }
+            case "screenshotPieces": {   // pieces of one painting: each one an artifact <step>.piece-<i>.png; a piece not on the screen is reported, not a failure of the step
+                ObjectNode body = mapper.createObjectNode();
+                body.set("pieces", mapper.valueToTree(step.pieces()));
+                if (step.padding() != null) body.put("padding", step.padding());
+                if (step.scale() != null) body.put("scale", step.scale());
+                if (Boolean.TRUE.equals(step.waitReady())) body.put("waitReady", true).put("readyTimeoutMs", step.timeoutMs() == null ? READY_TIMEOUT_MS : step.timeoutMs());
+                JsonNode r = runner.call(sessionId, "POST", "/screenshot-pieces", body, timeout);
+                List<Artifact> artifacts = new ArrayList<>();
+                com.fasterxml.jackson.databind.node.ArrayNode pieces = mapper.createArrayNode();
+                for (JsonNode piece : r.path("pieces")) {
+                    ObjectNode out = ((ObjectNode) piece).deepCopy();
+                    JsonNode png = out.remove("pngBase64");
+                    if (png != null && png.isTextual()) {
+                        String name = label + ".piece-" + piece.path("index").asInt() + ".png";
+                        artifacts.add(new Artifact(name, "image/png", java.util.Base64.getDecoder().decode(png.asText())));
+                        out.put("artifact", name);
+                    }
+                    pieces.add(out);
+                }
+                ObjectNode out = mapper.createObjectNode().put("activity", r.path("activity").asText(null));
+                out.set("pieces", pieces);
+                if (r.has("notes")) out.set("notes", r.get("notes"));
+                return new Outcome(out, artifacts);
             }
             case "layoutBounds": {
                 JsonNode r = runner.call(sessionId, "GET", "/layout-bounds?names=" + (Boolean.FALSE.equals(step.names()) ? 0 : 1), null, timeout);

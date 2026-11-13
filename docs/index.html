@@ -85,7 +85,7 @@
 {"id": 7, "op": "tap", "args": {"selector": {"testTag": "salvar"}}}
 
 # sidecar -> runner (stdout)
-{"event": "ready", "protocol": 1, "revision": "5ce2bd9b7452", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
+{"event": "ready", "protocol": 1, "revision": "ddd036d06d3d", "node": "v22.11.0", "pid": 4121}   # uma vez, runtime carregado
 {"id": 7, "ok": true, "result": {"via": "semantics", "element": {...}, "snapshot": {...}}}
 {"id": 8, "ok": false, "error": {"status": 404, "code": "element-not-found", "message": "...", "details": {"activity": "..."}}}
 {"event": "logcat", "data": [{"seq": 41, "level": "W", "tag": "APKWebLab", "message": "..."}]}       # só com assinatura
@@ -121,7 +121,7 @@ export RUNNER_TOKEN=$(openssl rand -hex 24)
 export QUEUE_CLIENTS="eu:$(openssl rand -hex 16)" QUEUE_RUNNERS="http://127.0.0.1:8081" QUEUE_RUNNER_TOKEN=$RUNNER_TOKEN
 ./gradlew :queue:run              # http://127.0.0.1:8080</code></pre>
 <pre><code>curl -s http://127.0.0.1:8081/health
-# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"5ce2bd9b7452","maxSessions":2,"available":2,
+# {"ok":true,"service":"apk-lab-runner","runtimeRevision":"ddd036d06d3d","maxSessions":2,"available":2,
 #  "memory":{"budgetMiB":1024,"maxHeapObjects":671088,"source":"navigator.deviceMemory=8","deviceMemory":8.0,"workerHeapMb":3072},
 #  "network":{"allowedHosts":["*"],"allowPrivateNetwork":false},"appData":true,...}</code></pre>
 <p>O runtime vem do repositório público do site, <strong>no commit fixado</strong> em <code>sidecar/runtime.lock.json</code> (revisão do <code>build-info.json</code>, lista de arquivos, tamanho e SHA-256). Uma publicação nova do site não muda o que este repositório roda. Para usar outra cópia do runtime (por exemplo, um <code>dist/</code> que você construiu), aponte <code>APK_LAB_RUNTIME_DIR</code> para ela. <code>node sidecar/fetch-runtime.mjs --check</code> confere uma cópia existente; <code>--base &lt;url&gt;</code> baixa de um espelho (os hashes continuam valendo).</p>
@@ -203,6 +203,7 @@ curl -s -H "Authorization: Bearer $QUEUE_CLIENT_TOKEN" http://127.0.0.1:8080/sta
 <tr><td>Logcat</td><td>sob demanda</td><td><code>on-demand</code></td><td></td></tr>
 <tr><td>Dados do app</td><td>mantidos entre execuções</td><td><code>appData.keep: true</code> em <code>data/app-data</code>, por <code>X-Client-Id</code></td><td><code>RUNNER_APP_DATA_DIR=off</code> desliga</td></tr>
 <tr><td>Resolução no movimento</td><td>0,5; tela nova reduzida</td><td><code>rasterScale: 0.5</code>, <code>rasterNavigation: true</code></td><td>valem com <code>raster: "progressive"</code></td></tr>
+<tr><td>Resolução com a tela parada</td><td>100 %</td><td><code>rasterSettled: 1</code> (ou 0.9, 0.8)</td><td>ao vivo; um print é sempre em densidade total</td></tr>
 <tr><td>WebView</td><td>ligado</td><td><strong>desligado</strong></td><td>exceção: não há navegador no servidor</td></tr>
 <tr><td>Raster</td><td>progressivo</td><td><strong><code>full</code></strong></td><td>exceção: uma captura nunca pega um quadro reduzido</td></tr>
 <tr><td>Diálogos de permissão</td><td>o usuário toca</td><td><strong><code>dismiss</code></strong></td><td>exceção: não há quem toque; mude com <code>permissions.dialogs</code></td></tr>

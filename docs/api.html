@@ -71,7 +71,7 @@
 
 <h2 id="servico">Runner: serviço</h2>
 <p class="endpoint"><span class="method">GET</span> /health <small>(público)</small></p>
-<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "5ce2bd9b7452",
+<pre><code>{"ok": true, "service": "apk-lab-runner", "implementation": "micronaut", "version": "0.1.0", "runtimeRevision": "ddd036d06d3d",
  "pluginsAllowed": false, "maxSessions": 2, "activeSessions": 1, "reserved": 0, "available": 1, "freeMemoryMb": 14980,
  "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8.0, "workerHeapMb": 3072},
  "network": {"allowedHosts": ["*"], "allowPrivateNetwork": false}, "appData": true}</code></pre>
@@ -97,7 +97,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/vnd.android.pac
 curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      -d "{\"apkBase64\": \"$(base64 &lt; app.apk | tr -d '\n')\", \"config\": {\"launch\": true}}" $R/sessions</code></pre>
 <pre><code>{"session": {"id": "5efd76bf-...", "state": "running", "packageName": "com.exemplo.app", "launcherActivity": "com.exemplo.app.MainActivity",
-             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "5ce2bd9b7452",
+             "activity": "com.exemplo.app.MainActivity", "metrics": {"loadMs": 440, "launchMs": 1150, "operations": 2}, "runtimeRevision": "ddd036d06d3d",
              "memory": {"budgetMiB": 1024, "maxHeapObjects": 671088, "source": "navigator.deviceMemory=8", "deviceMemory": 8, "workerHeapMb": 3072, "liveObjects": 40276, "vmLimit": 671088}, ...},
  "inventory": {"packageName": "...", "usesSdk": {"minSdkVersion": 24, "targetSdkVersion": 34}, "activities": [...], "usesPermissions": [...], ...},
  "config": { ...a config normalizada... },
@@ -131,6 +131,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
   "raster": "full",             // reload; padrão no servidor, ou "progressive"
   "rasterScale": 0.5,           // ao vivo; 1 | 0.75 | 0.5 | 0.35 | 0.25, escala no movimento com "progressive"
   "rasterNavigation": true,     // ao vivo; tela nova começa reduzida com "progressive"
+  "rasterSettled": 1,           // ao vivo; 1 | 0.9 | 0.8, "Resolução com a tela parada" (um print é sempre em densidade total)
   "logcat": "on-demand",        // ou "always"
   "plugins": [],                // exige RUNNER_ALLOW_PLUGINS=true
   "launch": true                // só na criação: true, false ou o nome de uma Activity
@@ -148,6 +149,7 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><code>endpointMocks</code></td><td>Até 50; <code>method</code> ANY|GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS; <code>url</code> com <code>http(s)://</code> ou começando com <code>/</code> (qualquer host), <code>*</code> como curinga; <code>query</code> ignore|exact; <code>status</code> 200–599; corpo até 4 MiB (<code>body</code> ou <code>bodyBase64</code>); <code>delayMs</code> até 600000.</td></tr>
 <tr><td><code>eventSeconds</code></td><td>0 ou 60 | 120 | 300: quanto um evento de entrada pode rodar na VM.</td></tr>
 <tr><td><code>rasterScale</code>, <code>rasterNavigation</code></td><td>"Resolução no movimento" com <code>raster: "progressive"</code>: escala 1 | 0.75 | 0.5 | 0.35 | 0.25 (outro valor: 400) e tela nova reduzida. Valem ao vivo (<code>applied</code> traz <code>{"key": "raster", "raster": {...}}</code>).</td></tr>
+<tr><td><code>rasterSettled</code></td><td>"Resolução com a tela parada": 1 (padrão) | 0.9 | 0.8, a densidade em que uma tela parada é desenhada. Ao vivo, junto com as duas acima (<code>raster.settled</code>). Um print é sempre em densidade total.</td></tr>
 </table>
 
 <h2 id="ciclo">Ciclo de vida</h2>
@@ -195,7 +197,9 @@ curl -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/screen-state</code></td><td>Descrição textual da tela (e se está em branco, com motivos).</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/diagnostic</code></td><td>Relatório: último erro, erros de runtime, lacunas de API, saúde da VM, APIs/classes/bibliotecas ausentes, mocks e overrides ativos.</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/screenshot.png</code></td><td>PNG da tela; <code>?scale=2&amp;systemBars=0</code>. Cabeçalhos <code>X-Image-Size</code> e <code>X-Screenshot-Notes</code>. <code>?waitReady=1&amp;readyTimeoutMs=15000</code> espera a "Tela pronta" antes de desenhar (408 <code>ready-timeout</code> com os motivos) e responde <code>X-Screen-Ready: {"ready":true,"waitedMs":308,"activity":"..."}</code>.</td></tr>
-<tr><td><span class="method">GET</span> <code>/sessions/{id}/elements/{key}/screenshot.png</code></td><td>PNG de um elemento pela chave de layout-bounds (mesmas opções <code>waitReady</code>).</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/screenshot.png?rect=l,t,r,b&amp;padding=8</code></td><td>Só um pedaço da tela: uma caixa da janela em dp (as coordenadas de <code>bounds</code> em <code>/layout-bounds</code>), alargada por <code>padding</code> (0 a 64 dp) até a borda da tela. <code>X-Screen-Bounds</code> diz onde a caixa ficou na tela desenhada; caixa fora da tela: 422 <code>empty-crop</code>.</td></tr>
+<tr><td><span class="method">GET</span> <code>/sessions/{id}/elements/{key}/screenshot.png</code></td><td>PNG de um elemento pela chave de layout-bounds (mesmas opções <code>waitReady</code>; <code>?padding=</code> em dp).</td></tr>
+<tr><td><span class="method">POST</span> <code>/sessions/{id}/screenshot-pieces</code></td><td>Vários pedaços de uma pintura só: <code>{"pieces": [{"selector": {...}} | {"key": "..."} | {"rect": [l, t, r, b]}], "padding": 4, "scale": 1, "waitReady": true}</code> (até 16; cada um com <code>padding</code> próprio opcional). Cada pedaço responde sozinho: <code>{index, kind, element?, bounds, screenBounds, width, height, pngBase64}</code> ou <code>{index, kind, error: {code, message}}</code> (um componente fora da tela não derruba os outros). Veja a <a href="cookbook.html#r19">receita 19</a>.</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/ready</code></td><td>"Tela pronta" agora (veja abaixo).</td></tr>
 </table>
 <p>O PNG é composto no sidecar com o CanvasKit (Skia) do próprio bundle: os rasters que a VM desenhou (Compose, Canvas, fundos, sombras, parágrafos Skia) ficam onde a página os põe; texto simples de widgets XML que o site desenharia com o DOM é aproximado com a Roboto do bundle e contado em <code>X-Screenshot-Notes</code> (<code>approximatedText</code>).</p>
@@ -269,6 +273,7 @@ POST /sessions/{id}/referrers     {"handle": "h9120.j0l26s"}
   <li><code>await lab.waitReady({timeoutMs = 15000})</code>: resolve com a tela quando estiver pronta; rejeita com <code>code: 'timeout'</code> e "A tela não ficou pronta: &lt;motivos&gt;".</li>
 </ul>
 <p>O modelo "Print na tela pronta" (<code>GET /plugin-templates</code>) tira um print da tela inteira cada vez que ela fica pronta.</p>
+<p>Componentes e pedaços num plugin: <code>await lab.find(alvo)</code> (os componentes que casam, no formato de <code>layoutBounds</code>), <code>await lab.capture(alvo, {padding})</code> (o PNG de um componente, com folga em dp) e <code>await lab.screenshot({target, bounds, padding, maxWidth})</code> (<code>bounds</code>: uma caixa da janela). O alvo é o do site: um <code>testTag</code>, um <code>android:id</code>, uma <code>key</code> ou <code>{testTag | viewId | text | contentDescription | role, index}</code>. O runner corta exatamente o que o plugin pede (<a href="cookbook.html#r19">receita 19</a>).</p>
 
 <h2 id="fila-servico">Fila: serviço</h2>
 <table>
@@ -307,7 +312,8 @@ curl -H "Authorization: Bearer $C" -F apk=@app.apk -F 'job={"priority": 7, "step
 <tr><td><code>type</code></td><td><code>selector</code>, <code>text</code>, <code>append</code></td><td>via, element</td></tr>
 <tr><td><code>scroll</code></td><td><code>selector</code> ou <code>x</code>/<code>y</code>, <code>dx</code>, <code>dy</code></td><td>via</td></tr>
 <tr><td><code>back</code>, <code>sleep</code></td><td>— , <code>ms</code> (até 60000)</td><td></td></tr>
-<tr><td><code>screenshot</code></td><td><code>scale</code>, <code>systemBars</code>, <code>selector</code> ou <code>key</code> (só o elemento), <code>waitReady</code> (espera a "Tela pronta"; <code>timeoutMs</code> vale para a espera)</td><td><code>&lt;nome&gt;.png</code> (e <code>ready</code> na saída)</td></tr>
+<tr><td><code>screenshot</code></td><td><code>scale</code>, <code>systemBars</code>, <code>selector</code> ou <code>key</code> (só o elemento) ou <code>rect</code> (uma caixa da janela em dp), <code>padding</code> (dp), <code>waitReady</code> (espera a "Tela pronta"; <code>timeoutMs</code> vale para a espera)</td><td><code>&lt;nome&gt;.png</code> (e <code>ready</code> na saída)</td></tr>
+<tr><td><code>screenshotPieces</code></td><td><code>pieces</code> (<code>[{selector} | {key} | {rect}]</code>, até 16), <code>padding</code>, <code>scale</code>, <code>waitReady</code></td><td>um artefato <code>&lt;nome&gt;.piece-&lt;i&gt;.png</code> por pedaço; o que não está na tela vem com <code>error</code> na saída</td></tr>
 <tr><td><code>layoutBounds</code></td><td><code>names</code></td><td>count, <code>&lt;nome&gt;.layout-bounds.json</code></td></tr>
 <tr><td><code>snapshot</code>, <code>composeTree</code> (<code>maxNodes</code>), <code>diagnostic</code></td><td></td><td>JSON como artefato</td></tr>
 <tr><td><code>elements</code>, <code>screenState</code>, <code>viewModels</code></td><td><code>selector</code></td><td>na saída</td></tr>

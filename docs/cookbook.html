@@ -42,6 +42,7 @@
   <a href="#r16">16. Recarregar a tela</a>
   <a href="#r17">17. Tela pronta e print</a>
   <a href="#r18">18. Estado num campo estático</a>
+  <a href="#r19">19. Um componente e pedaços da tela</a>
 </aside>
 <article>
 <h1>Receitas</h1>
@@ -443,6 +444,38 @@ JsonNode valor = http.retrieve(HttpRequest.POST("/sessions/" + id + "/static-fie
         Map.of("className", "com.exemplo.di.ContextoGlobal", "path", List.of("registro", "com.exemplo.Tela::id", "valor"))).bearerAuth(token), JsonNode.class);</code></pre>
 <p><code>instances</code> e <code>referrers</code> varrem o heap em páginas curtas entre eventos da VM e juntam até <code>limit</code> (50) itens ou <code>maxPages</code> (100) páginas; com <code>"done": false</code>, mande o <code>next</code> em <code>after</code> para continuar. Classe inexistente: 404 <code>no-class</code>; objeto já coletado: 410.</p>
 <p>Na fila: <code>{"type": "instances", "className": "..."}</code>, <code>{"type": "staticField", "className": "...", "path": [...]}</code>, e também <code>classes</code>, <code>statics</code> e <code>referrers</code>. Num plugin: <code>lab.classes</code>, <code>lab.statics</code>, <code>lab.staticField</code>, <code>lab.instances</code>, <code>lab.referrers</code> e <code>lab.watch({static: 'classe'}, caminho, fn)</code>.</p>
+<h2 id="r19">19. Um componente específico (plugin pela API) e pedaços da tela</h2>
+<p>Um plugin enviado pela API acha um componente e devolve os dados e o PNG só dele; sem plugin, os mesmos pedaços saem direto da API: um retângulo da janela, ou vários componentes de uma pintura só. A parte do plugin exige <code>RUNNER_ALLOW_PLUGINS=true</code>. Os tamanhos são os do exemplo Compose do lab.</p>
+<pre><code>cat &gt; plugin.json &lt;&lt;'JSON'
+{"plugins": [{"id": "componente", "name": "Um componente", "code": "const [busca] = await lab.find({ testTag: 'search' });\nlab.ui.kv({ key: busca.key, largura: Math.round(busca.size.width), altura: Math.round(busca.size.height) }, { id: 'dados' });\nlab.ui.image(await lab.capture({ testTag: 'search' }, { padding: 8 }), { id: 'componente' });"}]}
+JSON
+curl -s -X PUT -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d @plugin.json $R/sessions/$S/plugins
+curl -s -H "Authorization: Bearer $T" $R/sessions/$S/plugins/componente | jq '.blocks'
+# [ {"id": "dados", "kind": "kv", "entries": [["key","c:2820:47"],["largura","379"],["altura","64"]]},
+#   {"id": "componente", "kind": "image", "width": 395, "height": 80, ...} ]
+curl -s -H "Authorization: Bearer $T" -o busca.png $R/sessions/$S/plugins/componente/blocks/1/image
+
+# sem plugin: um retângulo da janela, e três pedaços de uma pintura
+curl -s -H "Authorization: Bearer $T" -o canto.png "$R/sessions/$S/screenshot.png?rect=0,0,200,100"     # 200 x 100
+curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' $R/sessions/$S/screenshot-pieces \
+  -d '{"padding": 4, "pieces": [{"selector": {"testTag": "search"}}, {"selector": {"testTag": "new-order"}}, {"rect": [16, 16, 116, 66]}]}' \
+  | jq '.pieces[] | {index, kind, width, height, error}'</code></pre>
+<span class="lang">Java</span>
+<pre><code>String code = """
+    const [busca] = await lab.find({ testTag: 'search' });
+    lab.ui.kv({ key: busca.key, largura: Math.round(busca.size.width), altura: Math.round(busca.size.height) }, { id: 'dados' });
+    lab.ui.image(await lab.capture({ testTag: 'search' }, { padding: 8 }), { id: 'componente' });
+    """;
+http.retrieve(HttpRequest.PUT("/sessions/" + id + "/plugins", Map.of("plugins", List.of(Map.of("id", "componente", "name", "Um componente", "code", code)))).bearerAuth(token), JsonNode.class);
+JsonNode saida = http.retrieve(HttpRequest.GET("/sessions/" + id + "/plugins/componente").bearerAuth(token), JsonNode.class);
+byte[] busca = http.retrieve(HttpRequest.GET("/sessions/" + id + "/plugins/componente/blocks/1/image").bearerAuth(token), byte[].class);
+
+byte[] canto = http.retrieve(HttpRequest.GET("/sessions/" + id + "/screenshot.png?rect=0,0,200,100").bearerAuth(token), byte[].class);
+JsonNode pedacos = http.retrieve(HttpRequest.POST("/sessions/" + id + "/screenshot-pieces", Map.of("padding", 4, "pieces", List.of(
+        Map.of("selector", Map.of("testTag", "search")), Map.of("selector", Map.of("testTag", "new-order")), Map.of("rect", List.of(16, 16, 116, 66))))).bearerAuth(token), JsonNode.class);
+for (JsonNode pedaco : pedacos.path("pieces"))
+    if (pedaco.has("pngBase64")) Files.write(Path.of("pedaco-" + pedaco.path("index").asInt() + ".png"), Base64.getDecoder().decode(pedaco.path("pngBase64").asText()));</code></pre>
+<p>Na fila: <code>{"type": "screenshot", "rect": "0,0,200,100"}</code> e <code>{"type": "screenshotPieces", "pieces": [...], "padding": 4}</code> (um artefato <code>&lt;nome&gt;.piece-&lt;i&gt;.png</code> por pedaço). Os testes <code>ScreenPiecesEndToEndTest</code> e <code>QueueEndToEndTest</code> rodam este fluxo.</p>
 <p class="note">Os dois fluxos (recriar mantém o ViewModel e reabrir cria outro; tela pronta, espera e print, também como job) são testes do repositório (<code>CookbookClientTest</code>, <code>RunnerEndToEndTest</code>, <code>QueueEndToEndTest</code>), rodados com APKs de sonda sintéticos.</p>
 </article>
 </main>

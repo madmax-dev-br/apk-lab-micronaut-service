@@ -105,7 +105,9 @@ class QueueEndToEndTest implements TestPropertyProvider {
                    {"type": "screenshot", "name": "tela"},
                    {"type": "screenshot", "name": "busca", "selector": {"testTag": "search"}, "scale": 2},
                    {"type": "viewModels", "name": "vms"},
-                   {"type": "diagnostic"}
+                   {"type": "diagnostic"},
+                   {"type": "screenshot", "name": "canto", "rect": "0,0,120,60"},
+                   {"type": "screenshotPieces", "name": "partes", "pieces": [{"selector": {"testTag": "search"}}, {"rect": [0, 0, 50, 50]}, {"selector": {"testTag": "not-on-screen"}}]}
                  ]}""";
         long started = System.nanoTime();
         HttpResponse<byte[]> submitted = send("POST", "/jobs", "application/vnd.android.package-archive", apk("compose-approvals-debug.apk"), Map.of("X-Job", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(JSON.readTree(job).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8))));   // headers are Latin-1: base64url for non-ASCII
@@ -118,7 +120,7 @@ class QueueEndToEndTest implements TestPropertyProvider {
         assertEquals("succeeded", result.path("state").asText(), result.toPrettyString());
         assertTrue(stream.contains("event: succeeded"));
         JsonNode steps = result.path("result").path("steps");
-        assertEquals(10, steps.size());
+        assertEquals(12, steps.size());
         List<String> stepMs = new ArrayList<>();
         steps.forEach(s -> stepMs.add(s.path("type").asText() + "=" + s.path("ms").asLong()));
         assertTrue(steps.get(5).path("output").path("count").asInt() > 5);
@@ -128,6 +130,14 @@ class QueueEndToEndTest implements TestPropertyProvider {
         byte[] element = send("GET", "/jobs/" + id + "/artifacts/busca.png", null, null, Map.of()).body();
         assertArrayEquals(PNG, java.util.Arrays.copyOf(element, 8));
         assertTrue(result.path("result").path("artifacts").toString().contains("network.json"));
+        // pieces of the screen: a box of the window, and one artifact per piece (a component not on the screen is reported in the output, not a failure)
+        byte[] corner = send("GET", "/jobs/" + id + "/artifacts/canto.png", null, null, Map.of()).body();
+        assertEquals(120, java.nio.ByteBuffer.wrap(corner).getInt(16)); assertEquals(60, java.nio.ByteBuffer.wrap(corner).getInt(20));
+        byte[] piece = send("GET", "/jobs/" + id + "/artifacts/partes.piece-1.png", null, null, Map.of()).body();
+        assertEquals(50, java.nio.ByteBuffer.wrap(piece).getInt(16));
+        JsonNode pieces = steps.get(11).path("output").path("pieces");
+        assertEquals("partes.piece-0.png", pieces.get(0).path("artifact").asText(), pieces.toString());
+        assertEquals("element-not-found", pieces.get(2).path("error").path("code").asText(), pieces.toString());
         System.out.printf("[e2e] queued job: %d ms total, session load %s ms, steps %s, screenshot %d bytes, element %d bytes%n", ms,
                 result.path("result").path("session").path("loadMs"), stepMs, png.length, element.length);
     }

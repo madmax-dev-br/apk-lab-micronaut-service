@@ -224,17 +224,37 @@ public class SessionsController {
     /** PNG of the current screen, composed with the bundle's Skia (CanvasKit): VM rasters as the page draws them, plain widget text approximated (x-screenshot-notes). */
     /** ?waitReady=1 waits for "Tela pronta" first (readyTimeoutMs, 15 s by default; 408 ready-timeout with the reasons) and adds the X-Screen-Ready header. */
     @Get(value = "/{id}/screenshot.png", produces = "image/png")
+    /** ?rect=left,top,right,bottom (window dp, the coordinates of layout-bounds "bounds") paints only that piece; &padding=0..64 widens it; X-Screen-Bounds says where it is. */
     public MutableHttpResponse<byte[]> screenshot(@PathVariable String id, @Nullable @QueryValue Double scale, @Nullable @QueryValue String systemBars,
-                                                  @Nullable @QueryValue String waitReady, @Nullable @QueryValue Integer readyTimeoutMs) {
+                                                  @Nullable @QueryValue String waitReady, @Nullable @QueryValue Integer readyTimeoutMs,
+                                                  @Nullable @QueryValue String rect, @Nullable @QueryValue Double padding) {
         ObjectNode args = mapper.createObjectNode().put("scale", scale == null ? 1 : scale).put("systemBars", truthy(systemBars, true));
+        if (rect != null && !rect.isBlank()) args.put("rect", rect);
+        if (padding != null) args.put("padding", padding);
         return png(callWithReady(id, "screenshot", args, waitReady, readyTimeoutMs));
+    }
+
+    /**
+     * Several pieces of the screen from one painting: { pieces: [{ selector } | { key } | { rect }, ...up to 16], padding, scale, waitReady, readyTimeoutMs }.
+     * Each piece answers on its own: { index, kind, element?, bounds, screenBounds, width, height, pngBase64 } or { index, kind, error } (the sidecar validates the body).
+     */
+    @Post("/{id}/screenshot-pieces")
+    public JsonNode screenshotPieces(@PathVariable String id, @Body JsonNode body) {
+        if (body == null || !body.isObject()) throw ApiException.badRequest("screenshot-pieces needs { pieces: [{ selector } | { key } | { rect }], padding?, scale?, waitReady? }");
+        ObjectNode args = ((ObjectNode) body).deepCopy();
+        if (!args.path("waitReady").asBoolean(false)) return sessions.get(id).call("screenshotPieces", args);
+        int timeout = args.has("readyTimeoutMs") ? Math.max(0, Math.min(MAX_WAIT_MS, args.path("readyTimeoutMs").asInt(READY_TIMEOUT_MS))) : READY_TIMEOUT_MS;
+        args.put("readyTimeoutMs", timeout);
+        return sessions.get(id).call("screenshotPieces", args, java.time.Duration.ofMillis(timeout + 45_000L));
     }
 
     /** PNG of one element, by its layout-bounds key (GET /sessions/{id}/layout-bounds lists the keys); same waitReady options. */
     @Get(value = "/{id}/elements/{key}/screenshot.png", produces = "image/png")
     public MutableHttpResponse<byte[]> elementScreenshot(@PathVariable String id, @PathVariable String key, @Nullable @QueryValue Double scale,
-                                                         @Nullable @QueryValue String waitReady, @Nullable @QueryValue Integer readyTimeoutMs) {
+                                                         @Nullable @QueryValue String waitReady, @Nullable @QueryValue Integer readyTimeoutMs,
+                                                         @Nullable @QueryValue Double padding) {
         ObjectNode args = mapper.createObjectNode().put("key", key).put("scale", scale == null ? 1 : scale);
+        if (padding != null) args.put("padding", padding);
         return png(callWithReady(id, "elementScreenshot", args, waitReady, readyTimeoutMs));
     }
 
@@ -253,6 +273,7 @@ public class SessionsController {
                 .header("Cache-Control", "no-store");
         if (shot.has("notes")) response.header("X-Screenshot-Notes", shot.get("notes").toString());
         if (shot.has("ready")) response.header("X-Screen-Ready", shot.get("ready").toString());
+        if (shot.has("screenBounds")) response.header("X-Screen-Bounds", shot.get("screenBounds").toString());
         return response;
     }
 
@@ -388,7 +409,7 @@ public class SessionsController {
 
     @Put("/{id}/plugins")
     public JsonNode setPlugins(@PathVariable String id, @Valid @Body Requests.Plugins body) {
-        SessionConfig asConfig = new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, body.plugins(), null);
+        SessionConfig asConfig = new SessionConfig(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, body.plugins(), null);
         JsonNode checked = configs.check(asConfig, "config");
         RunnerSession session = sessions.get(id);
         ObjectNode args = mapper.createObjectNode();

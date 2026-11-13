@@ -76,6 +76,9 @@ public class ConfigValidator {
         if (config.rasterScale() != null && !SessionConfig.RASTER_SCALE_STEPS.contains(config.rasterScale())) {
             throw ApiException.badRequest(where + ".rasterScale: one of 1, 0.75, 0.5, 0.35, 0.25 (default 0.5; used while the screen moves when raster is \"progressive\")");
         }
+        if (config.rasterSettled() != null && !SessionConfig.RASTER_SETTLED_STEPS.contains(config.rasterSettled())) {
+            throw ApiException.badRequest(where + ".rasterSettled: one of 1, 0.9, 0.8 (default 1: a still screen is drawn at full density; a screenshot is always full density)");
+        }
         if (config.launch() != null && !(config.launch().isBoolean() || (config.launch().isTextual() && config.launch().asText().length() <= 500))) {
             throw ApiException.badRequest(where + ".launch: true, false or an Activity name");
         }

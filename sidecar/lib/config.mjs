@@ -2,7 +2,7 @@
 // method specs, permissions) plus the runner operator's network policy. Unknown keys are rejected so a typo never silently does nothing.
 import { badRequest, HttpError } from './errors.mjs';
 
-export const CONFIG_KEYS = ['device', 'network', 'permissions', 'methodOverrides', 'ignoredActivities', 'endpointMocks', 'eventSeconds', 'missingApis', 'strictCrash', 'memoryMiB', 'engine', 'coreMemory', 'appData', 'raster', 'rasterScale', 'rasterNavigation', 'logcat', 'plugins', 'launch'];
+export const CONFIG_KEYS = ['device', 'network', 'permissions', 'methodOverrides', 'ignoredActivities', 'endpointMocks', 'eventSeconds', 'missingApis', 'strictCrash', 'memoryMiB', 'engine', 'coreMemory', 'appData', 'raster', 'rasterScale', 'rasterNavigation', 'rasterSettled', 'logcat', 'plugins', 'launch'];
 const DEVICE_KEYS = ['screen', 'orientation', 'connectivity', 'navigation', 'fontScale', 'animatorScale', 'statusBarHeightDp', 'darkTheme', 'hour24', 'locale', 'timeZone', 'battery'];
 const NETWORK_KEYS = ['allowedHosts', 'hostMap', 'offline', 'proxyUrl'];
 const PERMISSION_KEYS = ['states', 'location', 'dialogs'];
@@ -15,6 +15,8 @@ export const DIALOG_MODES = ['dismiss', 'manual', 'allow', 'once', 'deny'];
 const MISSING_APIS = { strict: 'off', off: 'off', void: 'void', primitives: 'primitives', all: 'all' };
 /** "Resolução no movimento" steps (the bundle's motion-raster.js MOTION_SCALE_STEPS): 1 = always full density. */
 export const RASTER_SCALE_STEPS = [1, 0.75, 0.5, 0.35, 0.25];
+/** "Resolução com a tela parada" steps (the bundle's motion-raster.js SETTLED_SCALE_STEPS): the density a still screen is drawn at; a screenshot is always full density. */
+export const RASTER_SETTLED_STEPS = [1, 0.9, 0.8];
 
 /**
  * The defaults of a session: the site's defaults for a new visitor (device-settings.js defaultDeviceSettings(), the page's controls), with three deliberate server
@@ -25,7 +27,7 @@ export const RASTER_SCALE_STEPS = [1, 0.75, 0.5, 0.35, 0.25];
 export function sessionDefaults(policy = {}) {
   const operator = policy.allowedHosts ?? ['*'];
   return { network: { allowedHosts: operator.includes('*') ? ['*'] : [...operator], hostMap: [], proxyUrl: '' }, eventSeconds: 0, missingApis: 'primitives', strictCrash: false, memoryMiB: 0, engine: 'wasm', coreMemory: { ...CORE_MEMORY_DEFAULT },
-    appData: { keep: true, clear: false }, raster: 'full', rasterScale: 0.5, rasterNavigation: true, logcat: 'on-demand' };
+    appData: { keep: true, clear: false }, raster: 'full', rasterScale: 0.5, rasterNavigation: true, rasterSettled: 1, logcat: 'on-demand' };
 }
 /** A validated config with the session defaults filled in for every key the client left out (network keys one by one). */
 export function withDefaults(config, policy) {
@@ -150,6 +152,7 @@ export function validateConfig(input, { modules, policy }, { partial = false } =
   if (input.raster !== undefined) { if (!['progressive', 'full'].includes(input.raster)) throw badRequest('config.raster: "full" (default) or "progressive"'); out.raster = input.raster; }
   if (input.rasterScale !== undefined) { const value = Number(input.rasterScale); if (typeof input.rasterScale !== 'number' || !RASTER_SCALE_STEPS.includes(value)) throw badRequest(`config.rasterScale: one of ${RASTER_SCALE_STEPS.join(', ')} (default 0.5; used while the screen moves when raster is "progressive")`); out.rasterScale = value; }
   if (input.rasterNavigation !== undefined) { if (typeof input.rasterNavigation !== 'boolean') throw badRequest('config.rasterNavigation must be a boolean (default true: a new screen starts reduced when raster is "progressive")'); out.rasterNavigation = input.rasterNavigation; }
+  if (input.rasterSettled !== undefined) { const value = Number(input.rasterSettled), steps = modules.SETTLED_SCALE_STEPS ?? RASTER_SETTLED_STEPS; if (typeof input.rasterSettled !== 'number' || !steps.includes(value)) throw badRequest(`config.rasterSettled: one of ${steps.join(', ')} (default 1: a still screen is drawn at full density; a screenshot is always full density)`); out.rasterSettled = value; }
   if (input.logcat !== undefined) { if (!['on-demand', 'always'].includes(input.logcat)) throw badRequest('config.logcat: "on-demand" (default) or "always"'); out.logcat = input.logcat; }
   if (input.launch !== undefined) { if (!(typeof input.launch === 'boolean' || (typeof input.launch === 'string' && input.launch.length <= 500))) throw badRequest('config.launch: true, false or an Activity name'); out.launch = input.launch; }
   if (input.plugins !== undefined) out.plugins = validatePlugins(input.plugins, policy);

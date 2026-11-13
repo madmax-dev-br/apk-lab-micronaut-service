@@ -4,6 +4,7 @@ import { HttpError, badRequest } from './errors.mjs';
 import { validateConfig, withDefaults, sessionDefaults } from './config.mjs';
 import { hostDeviceMemory, memoryReport, workerHeapMb } from './memory.mjs';
 import { Session, publicSnapshot, inventorySummary } from './session.mjs';
+import { rectFrom, paddingFrom, piecesFrom, pieceOut } from './pieces.mjs';
 import { reloadModeFrom, readyFlagFrom, screenReadyOut, READY_TIMEOUT_MS, MAX_WAIT_MS, SERVICE_PLUGIN_TEMPLATES } from './readiness.mjs';
 
 const SELECTOR_KEYS = ['key', 'testTag', 'text', 'textContains', 'contentDescription', 'androidId', 'viewId', 'kind', 'clickable', 'index'];
@@ -43,7 +44,7 @@ export function summary(session) {
       ...(s.vmHealth.core ? { core: s.vmHealth.core } : {}) } : null,   // engine 'wasm': no object limit; `core` = { metaBytes, metaCapacity, threads, threadCapacity, heapBytes, liveBytes } of the WebAssembly core's memory
     debugging: { methodOverrides: s.methodOverrides ?? [], endpointMocks: s.endpointMocks ?? [], hostMap: s.hostMap ?? [], ignoredActivities: s.ignoredActivities ?? [] } };
 }
-const png = shot => ({ pngBase64: shot.png.toString('base64'), width: shot.width, height: shot.height, notes: shot.notes, ...(shot.element ? { element: shot.element } : {}),
+const png = shot => ({ pngBase64: shot.png.toString('base64'), width: shot.width, height: shot.height, notes: shot.notes, ...(shot.element ? { element: shot.element } : {}), ...(shot.screenBounds ? { screenBounds: shot.screenBounds } : {}),
   ...(shot.ready ? { ready: { ready: !!shot.ready.screenReady?.ready, waitedMs: shot.ready.waitedMs, activity: shot.ready.screenReady?.activity ?? null } } : {}) });
 /** waitReady / readyTimeoutMs of a screenshot operation. */
 const readyArgs = args => ({ waitReady: args.waitReady === true, readyTimeoutMs: num(args.readyTimeoutMs, READY_TIMEOUT_MS, 0, MAX_WAIT_MS) });
@@ -136,8 +137,10 @@ export function createOps({ bundle, painter, rasterStats, send, log, readApk }) 
     composeTree: args => need().composeTree({ maxNodes: num(args.maxNodes, 2000, 1, 4000) }),
     screenState: async () => (await need().screenState()) ?? { text: null },
     diagnostic: () => need().diagnostic(),
-    screenshot: async args => png(await need().screenshot({ scale: num(args.scale, 1, 0.1, 4), systemBars: args.systemBars !== false, ...readyArgs(args) })),
-    elementScreenshot: async args => { if (typeof args.key !== 'string') throw badRequest('elementScreenshot needs key'); return png(await need().elementScreenshot(args.key, { scale: num(args.scale, 1, 0.1, 4), ...readyArgs(args) })); },
+    screenshot: async args => png(await need().screenshot({ scale: num(args.scale, 1, 0.1, 4), systemBars: args.systemBars !== false, rect: rectFrom(args.rect), padding: paddingFrom(args.padding), ...readyArgs(args) })),   // rect: a box of the window in dp ("l,t,r,b", an array or an object)
+    elementScreenshot: async args => { if (typeof args.key !== 'string') throw badRequest('elementScreenshot needs key'); return png(await need().elementScreenshot(args.key, { scale: num(args.scale, 1, 0.1, 4), padding: paddingFrom(args.padding), ...readyArgs(args) })); },
+    // Several pieces of the screen from one painting: components by selector or key, and boxes of the window; each piece answers on its own (PNG in base64)
+    screenshotPieces: async args => { const out = await need().screenshotPieces({ pieces: piecesFrom(args.pieces), padding: paddingFrom(args.padding), scale: num(args.scale, 1, 0.1, 4), ...readyArgs(args) }); return { ...out, pieces: out.pieces.map(pieceOut) }; },
 
     activity: async () => (await need().pluginQuery('activity', {})).value,
     viewModels: async () => (await need().pluginQuery('viewModels', {})).value,

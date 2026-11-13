@@ -21,7 +21,7 @@ public final class QueueRequests {
 
     /** Step types of a job, in the order the queue runs them. */
     public static final List<String> STEP_TYPES = List.of("launch", "intent", "wait", "waitReady", "reload", "tap", "type", "scroll", "back", "sleep", "screenshot", "layoutBounds", "snapshot",
-            "elements", "viewModels", "viewModelField", "inspect", "field", "composeTree", "classes", "statics", "staticField", "instances", "referrers", "config", "logcat", "network", "plugins", "diagnostic", "screenState");
+            "elements", "viewModels", "viewModelField", "inspect", "field", "composeTree", "classes", "statics", "staticField", "instances", "referrers", "config", "logcat", "network", "plugins", "diagnostic", "screenState", "screenshotPieces");
 
     /**
      * A job: an APK (multipart part "apk", apkBase64 or apkUrl), the session config and declarative steps. The queue runs it on a runner session and keeps the
@@ -48,7 +48,8 @@ public final class QueueRequests {
     /**
      * One declarative step. `type` picks the step; only the fields of that type may be set (others are rejected by the queue's validation).
      * Common fields: name (unique, names its artifacts), continueOnError, timeoutMs. "Tela pronta": wait takes ready (alone or with a selector), waitReady waits for it,
-     * screenshot takes waitReady; reload takes mode ("recreate", the default, or "reopen"). State outside the screen: classes (match, limit, initialized),
+     * screenshot takes waitReady, and rect (a box of the window in dp: "l,t,r,b", an array or an object) with padding (0-64 dp); screenshotPieces takes pieces
+     * ([{ selector } | { key } | { rect }], up to 16, each with an optional own padding), padding, scale and waitReady (one artifact per piece); reload takes mode ("recreate", the default, or "reopen"). State outside the screen: classes (match, limit, initialized),
      * statics (className), staticField (className, path), instances (className, subclasses, limit, after, maxPages) and referrers (handle, limit, after, maxPages).
      * path is a dotted string or an array of parts (a part with dots, such as a map key).
      */
@@ -95,7 +96,10 @@ public final class QueueRequests {
             @Nullable @Size(max = 500) String className,
             @Nullable Boolean subclasses,
             @Nullable @Min(0) Long after,
-            @Nullable @Min(1) @Max(500) Integer maxPages) {
+            @Nullable @Min(1) @Max(500) Integer maxPages,
+            @Nullable Object rect,
+            @Nullable @DecimalMin("0") @DecimalMax("64") Double padding,
+            @Nullable @Size(max = 16) List<Map<String, Object>> pieces) {
 
         /** A step with only a type (and optionally a name), for code that builds jobs. */
         public static Step of(String type) { return new Builder(type).build(); }
@@ -108,6 +112,7 @@ public final class QueueRequests {
             private Integer ms, maxNodes, limit, seconds; private Map<String, Object> options; private SessionConfig config; private List<PluginSpec> plugins;
             private String mode; private Boolean ready, waitReady; private Object path;
             private String match, className; private Boolean initialized, subclasses; private Long after; private Integer maxPages;
+            private Object rect; private Double padding; private List<Map<String, Object>> pieces;
             Builder(String type) { this.type = type; }
             public Builder name(String v) { name = v; return this; }
             public Builder continueOnError(boolean v) { continueOnError = v; return this; }
@@ -158,10 +163,16 @@ public final class QueueRequests {
             public Builder after(long v) { after = v; return this; }
             /** instances, referrers: at most this many of the runtime's pages (100, max 500). */
             public Builder maxPages(int v) { maxPages = v; return this; }
+            /** screenshot: only this box of the window, in dp ("left,top,right,bottom" or a List of four numbers). */
+            public Builder rect(Object v) { rect = v; return this; }
+            /** screenshot, screenshotPieces: dp around the piece (0-64). */
+            public Builder padding(double v) { padding = v; return this; }
+            /** screenshotPieces: [{ "selector": {...} } | { "key": "..." } | { "rect": ... }], each with an optional own "padding". */
+            public Builder pieces(List<Map<String, Object>> v) { pieces = v; return this; }
             public Step build() {
                 return new Step(type, name, continueOnError, timeoutMs, activity, intent, selector, x, y, longPress, text, append, dx, dy, gone, ms, scale, key, systemBars, names,
                         viewModel, path, options, handle, maxNodes, config, level, tag, contains, limit, plugins, seconds, mode, ready, waitReady,
-                        match, initialized, className, subclasses, after, maxPages);
+                        match, initialized, className, subclasses, after, maxPages, rect, padding, pieces);
             }
         }
     }
