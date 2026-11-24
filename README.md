@@ -79,6 +79,7 @@ Runtime fixado: revisão `ddd036d06d3d` (commit `0101a0aa` do site). Uma sessão
 - Todo snapshot traz `screenReady = {ready, activity, readySince, settledForMs, quietMs, waitingFor, fragments}`: pronta quando a Activity está em `onResume` com o primeiro quadro desenhado, os fragments androidx `RESUMED` e nada pendente (quadro, layout, mensagem da thread principal, rede) por 300 ms. `waitingFor` traz os motivos em português.
 - `GET /sessions/{id}/ready`; `POST /sessions/{id}/wait` com `{"ready": true}` (sozinho ou com um seletor); `?waitReady=1&readyTimeoutMs=15000` em `screenshot.png` e na captura de elemento (cabeçalho `X-Screen-Ready`); o evento SSE `ready` em `/events` a cada virada; passos `reload`, `waitReady`, `wait` com `ready` e `screenshot` com `waitReady`. Tempo esgotado: 408 com os motivos.
 - Plugins (o runtime de plugins do bundle): `screen.ready`, `lab.on('ready', fn)`, `await lab.waitReady({timeoutMs})`, e o modelo "Print na tela pronta" em `GET /plugin-templates`.
+- Ações de um plugin: `lab.invoke` (chama um método do app), `lab.mock` / `lab.unmock` / `lab.mocks`, `lab.scrollTo` / `lab.scrollToPercent` / `lab.scrollInfo` e `lab.reload`. O que desenha na página (modal, aba, highlight, overlay) responde `unsupported` no servidor.
 
 Receitas 16 ("Recarregar a tela") e 17 ("Esperar a tela ficar pronta e tirar o print") em [Receitas](https://madmax-dev-br.github.io/apk-lab-micronaut-service/cookbook.html#r16).
 

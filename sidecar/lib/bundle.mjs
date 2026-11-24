@@ -4,13 +4,13 @@ import { requireRuntime, importRuntime, runtimeFileURL } from './runtime-dir.mjs
 
 /** Entry points of the bundle this service imports (scripts/make-runtime-lock.mjs follows their imports to build the download list). */
 export const BUNDLE_ENTRY_POINTS = ['apk-worker-client.js', 'raster-cache.js', 'compose-inspector-panel.js', 'plugin-host.js', 'plugin-runtime.js', 'device-settings.js', 'runtime/apk-worker.js',
-  'runtime/host-map.js', 'runtime/endpoint-mocks.js', 'runtime/method-overrides.js', 'runtime/runtime-permissions.js', 'runtime/time-limits.js', 'runtime/memory-budget.js', 'runtime/motion-raster.js', 'runtime/core-memory.js', 'vmcore/js/attach.js'];
+  'runtime/host-map.js', 'runtime/endpoint-mocks.js', 'runtime/method-overrides.js', 'runtime/runtime-permissions.js', 'runtime/time-limits.js', 'runtime/memory-budget.js', 'runtime/motion-raster.js', 'runtime/core-memory.js', 'vmcore/js/attach.js', 'lab-scroll.js'];
 
 export async function loadBundle(dir) {
   const info = requireRuntime(dir);
-  const [client, raster, panel, pluginHost, pluginRuntime, settings, hostMap, mocks, overrides, permissions, timeLimits, memory, motion, core] = await Promise.all([
+  const [client, raster, panel, pluginHost, pluginRuntime, settings, hostMap, mocks, overrides, permissions, timeLimits, memory, motion, core, labScroll] = await Promise.all([
     'apk-worker-client.js', 'raster-cache.js', 'compose-inspector-panel.js', 'plugin-host.js', 'plugin-runtime.js', 'device-settings.js', 'runtime/host-map.js', 'runtime/endpoint-mocks.js',
-    'runtime/method-overrides.js', 'runtime/runtime-permissions.js', 'runtime/time-limits.js', 'runtime/memory-budget.js', 'runtime/motion-raster.js', 'runtime/core-memory.js'].map(file => importRuntime(info, file)));
+    'runtime/method-overrides.js', 'runtime/runtime-permissions.js', 'runtime/time-limits.js', 'runtime/memory-budget.js', 'runtime/motion-raster.js', 'runtime/core-memory.js', 'lab-scroll.js'].map(file => importRuntime(info, file)));
   return {
     info,
     workerURL: new URL(`${runtimeFileURL(info, 'runtime/apk-worker.js').href}?v=${info.revision}`),
@@ -18,6 +18,7 @@ export async function loadBundle(dir) {
     createRasterReceiver: raster.createRasterReceiver,
     buildLayoutBoundsElements: panel.buildLayoutBoundsElements, flattenViews: panel.flattenViews,
     createPluginHost: pluginHost.createPluginHost, screenFromSnapshot: pluginHost.screenFromSnapshot, pluginWorkerSource: pluginRuntime.pluginWorkerSource, PLUGIN_TEMPLATES: pluginRuntime.PLUGIN_TEMPLATES ?? [],
+    createLabScroll: labScroll.createLabScroll,   // lab.scrollTo / lab.scrollInfo of the server's plugins (lib/plugin-actions.mjs)
     sanitizeSettings: settings.sanitizeSettings, sanitizeHosts: settings.sanitizeHosts, sanitizeProxyUrl: settings.sanitizeProxyUrl,
     sanitizeHostMap: hostMap.sanitizeHostMap, parseRule: hostMap.parseRule,
     validateMock: mocks.validateMock, MAX_MOCKS: mocks.MAX_MOCKS ?? 50,

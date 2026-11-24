@@ -257,7 +257,7 @@ POST /sessions/{id}/referrers     {"handle": "h9120.j0l26s"}
 <p class="endpoint"><span class="method">POST</span> /sessions/{id}/app-data/clear</p>
 
 <h2 id="plugins">Plugins</h2>
-<p>Desligados por padrão; exigem <code>RUNNER_ALLOW_PLUGINS=true</code> (veja <a href="seguranca.html#plugins">Segurança</a>). Um plugin é o corpo de uma função async com a mesma API <code>lab</code> (somente leitura) dos plugins do site.</p>
+<p>Desligados por padrão; exigem <code>RUNNER_ALLOW_PLUGINS=true</code> (veja <a href="seguranca.html#plugins">Segurança</a>). Um plugin é o corpo de uma função async com a mesma API <code>lab</code> dos plugins do site.</p>
 <table>
 <tr><td><span class="method">PUT</span> <code>/sessions/{id}/plugins</code></td><td><code>{"plugins": [{"id", "name", "code", "enabled"}]}</code> (lista vazia remove todos)</td></tr>
 <tr><td><span class="method">GET</span> <code>/sessions/{id}/plugins</code></td><td>Estado e saída de cada um (<code>?images=inline</code> embute imagens em base64).</td></tr>
@@ -273,6 +273,16 @@ POST /sessions/{id}/referrers     {"handle": "h9120.j0l26s"}
   <li><code>await lab.waitReady({timeoutMs = 15000})</code>: resolve com a tela quando estiver pronta; rejeita com <code>code: 'timeout'</code> e "A tela não ficou pronta: &lt;motivos&gt;".</li>
 </ul>
 <p>O modelo "Print na tela pronta" (<code>GET /plugin-templates</code>) tira um print da tela inteira cada vez que ela fica pronta.</p>
+<p>Ações de um plugin no servidor. Cada uma entra na fila de operações da sessão (uma por vez, como um toque) e exige o app aberto; um plugin de <code>config.plugins</code> espera a abertura terminar:</p>
+<table>
+<tr><th>Ação</th><th>O que faz</th></tr>
+<tr><td><code>await lab.methods(handle | {static: 'pacote.Classe'}, {match})</code></td><td>Lista os métodos (nada roda).</td></tr>
+<tr><td><code>await lab.invoke(handle | {static: 'pacote.Classe'}, 'metodo', [args], {signature})</code></td><td>Chama um método do app na thread principal da VM. Rejeita com <code>code</code> <code>exception</code> (a exceção Java que o método lançou), <code>no-method</code>, <code>bad-args</code>, <code>no-apk</code>...</td></tr>
+<tr><td><code>lab.mock({method, url, status, headers, body})</code> · <code>lab.unmock(id)</code> · <code>lab.mocks()</code></td><td>Mocks de endpoint da sessão, na mesma lista de <code>config.endpointMocks</code> (um <code>PATCH</code> dessa chave troca a lista inteira; os mocks ficam depois que o plugin para).</td></tr>
+<tr><td><code>lab.scrollTo(...)</code> · <code>lab.scrollToPercent(...)</code> · <code>lab.scrollInfo(...)</code></td><td>Rola um componente até uma posição ou porcentagem, ou diz onde ele está.</td></tr>
+<tr><td><code>lab.reload('recreate' | 'reopen')</code></td><td>Recria ou reabre a Activity, como <code>POST /reload</code>.</td></tr>
+</table>
+<p>O que desenha na página do site (modal, aba lateral, <code>frame</code>, <code>highlight</code>, overlay, <code>track</code>) não existe no servidor e responde <code>code: 'unsupported'</code>.</p>
 <p>Componentes e pedaços num plugin: <code>await lab.find(alvo)</code> (os componentes que casam, no formato de <code>layoutBounds</code>), <code>await lab.capture(alvo, {padding})</code> (o PNG de um componente, com folga em dp) e <code>await lab.screenshot({target, bounds, padding, maxWidth})</code> (<code>bounds</code>: uma caixa da janela). O alvo é o do site: um <code>testTag</code>, um <code>android:id</code>, uma <code>key</code> ou <code>{testTag | viewId | text | contentDescription | role, index}</code>. O runner corta exatamente o que o plugin pede (<a href="cookbook.html#r19">receita 19</a>).</p>
 
 <h2 id="fila-servico">Fila: serviço</h2>

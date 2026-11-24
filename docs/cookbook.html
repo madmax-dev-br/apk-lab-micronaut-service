@@ -275,7 +275,7 @@ Flux.from(sse.eventStream(HttpRequest.GET("/sessions/" + id + "/logcat/stream").
 <p>Enquanto nenhum stream está aberto, a VM não manda linhas de Logcat ao servidor (custo zero); abrir o primeiro stream liga o envio e manda as linhas recentes.</p>
 
 <h2 id="r13">13. Plugin no servidor observando um campo de ViewModel</h2>
-<p>Exige <code>RUNNER_ALLOW_PLUGINS=true</code> (só para usuários confiáveis: veja <a href="seguranca.html#plugins">Segurança</a>). O código é o de um plugin do site: a API <code>lab</code> somente leitura.</p>
+<p>Exige <code>RUNNER_ALLOW_PLUGINS=true</code> (só para usuários confiáveis: veja <a href="seguranca.html#plugins">Segurança</a>). O código é o de um plugin do site, com a mesma API <code>lab</code>; as ações (<code>lab.invoke</code>, <code>lab.mock</code>, ...) estão em <a href="api.html#plugins">API</a>.</p>
 <pre><code>cat &gt; plugin.json &lt;&lt;'EOF'
 {"plugins": [{"id": "observar-vm", "name": "Observar ViewModel", "code": "const lista = await lab.viewModels();\nconst vm = lista.find(v => v.className.endsWith('PedidosViewModel')) ?? lista.find(v => !v.library);\nif (!vm) { lab.ui.text('Nenhum ViewModel na tela'); return; }\nlab.ui.badge(vm.className.split('.').pop());\nlab.watch(vm.handle, 'estado.value', valor => lab.ui.json(valor, { id: 'estado' }), { intervalMs: 250, depth: 2 });"}]}
 EOF

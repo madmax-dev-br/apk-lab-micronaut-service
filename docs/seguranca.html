@@ -56,7 +56,7 @@
 <ul>
   <li>Cada plugin roda no sidecar da sessão, num <code>worker_threads</code> Worker próprio com <code>resourceLimits</code> (<code>RUNNER_PLUGIN_HEAP_MB</code>), num contexto <code>node:vm</code> que só tem timers, console (descartado) e a ponte de mensagens: sem <code>process</code>, <code>require</code>, <code>import()</code>, <code>fetch</code> nem o ambiente.</li>
   <li>Um watchdog mede a utilização da thread do plugin de fora: ocupado acima de 90% por <code>RUNNER_PLUGIN_BUSY_S</code> segundos seguidos, o plugin é encerrado e relatado; <code>RUNNER_PLUGIN_MAX_RUN_S</code> limita a duração total.</li>
-  <li>A API <code>lab</code> é somente leitura (tela, layout bounds, ViewModels, campos, Logcat, rede, imagens): o plugin não toca, não digita e não muda a config.</li>
+  <li>A API <code>lab</code> lê o estado do app (tela, layout bounds, ViewModels, campos, Logcat, rede, imagens) e age só dentro da própria sessão: <code>lab.invoke</code> chama métodos do app na VM, <code>lab.mock</code>/<code>lab.unmock</code> mudam os mocks de endpoint da sessão, <code>lab.scrollTo</code> rola e <code>lab.reload</code> recria a Activity (veja <a href="api.html#plugins">API</a>). O plugin não muda a política de rede nem os limites do runner: a rede que um método chamado usa passa pelas mesmas recusas.</li>
   <li><strong><code>worker_threads</code> e <code>node:vm</code> não são uma fronteira de segurança.</strong> Eles removem as capacidades óbvias e limitam memória e CPU, mas código malicioso determinado pode escapar de um contexto <code>vm</code>. Para usuários não confiáveis, mantenha os plugins desligados ou rode cada runner num contêiner/VM descartável sem segredos e sem rede interna.</li>
 </ul>
 
